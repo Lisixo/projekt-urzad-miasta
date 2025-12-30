@@ -1,0 +1,12 @@
+bin/
+
+# ignore cmake config
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+libhelpers.a
+build/
+
+# ignore vsc config
+.vscode/
