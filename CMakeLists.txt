@@ -5,12 +5,16 @@ project(SymulacjaUrzadMiasta LANGUAGES C)
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# debug build mode
+set(CMAKE_BUILD_TYPE Debug)
+
 # output dir
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 
 # helpers source
 file(GLOB HELPER_SOURCES "src/helpers/*.c")
 add_library(helpers STATIC ${HELPER_SOURCES})
+target_include_directories(helpers PUBLIC src)
 
 # programs source
 file(GLOB PROGRAM_FILES "src/programs/*.c")
