@@ -14,16 +14,7 @@ typedef struct {
  */
 key_t uniq_key(const char key);
 
-// /**
-//  * Tworzy kolejke wiadomosci
-//  * @param key identyfikator kolejki
-//  */
-// int sync_msg_create(key_t key);
-
-// /**
-//  * Wysyła wiadomość do kolejki
-//  */
-// int sync_msg_send(int msgid, const void *msg_ptr, int size);
+// MESSAGE QUEUES
 
 /**
  * Odbiera wiadomość z kolejki
@@ -34,3 +25,13 @@ int sync_msg_receive(int msgid, void *msg_ptr, int size, long type);
  * Niszczy kolejke
  */
 int sync_msg_destroy(int msgid);
+
+// SEMAPHOR
+
+int sem_create(key_t id, int size, int default_state);
+
+int sem_lock(int sem_id, unsigned short sem_num);
+
+int sem_unlock(int sem_id, unsigned short sem_num);
+
+int sem_destroy(int sem_id);

@@ -4,30 +4,59 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/sem.h>
 
 key_t uniq_key(const char key) {
   key_t k = ftok(".", key);
   return k;
 }
 
+// MESSAGE QUEUES
+
 int sync_msg_create(key_t key) {
-  int msgid = msgget(key, SYNC_PERM | IPC_CREAT);
-
-  if(msgid == -1) {
-    perror("sync_msg_create: failed to create msg queue");
-    return -1;
-  }
-
-  return msgid;
+  return msgget(key, SYNC_PERM | IPC_CREAT | IPC_EXCL);
 }
-
-// int sync_msg_send(int msgid, const void *msg_ptr, int size) {
-// }
-
-// int sync_msg_receive(int msgid, void *msg_ptr, int size, long type) {
-
-// }
 
 int sync_msg_destroy(int msgid) {
   return msgctl(msgid, IPC_RMID, NULL);
 }
+
+// SEMAPHOR
+
+int sem_create(key_t id, int size, int default_state) {
+  int semid = semget(id, size, IPC_CREAT | IPC_EXCL | SYNC_PERM);
+
+  if(semid == -1) {
+    return -1;
+  }
+
+  union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+  } arg;
+  arg.val = default_state;
+
+  for(int i=0; i<size; i++){
+    if(semctl(semid, i, SETVAL, arg) == -1) {
+      sem_destroy(semid);
+      return -1;
+    }
+  }
+
+  return semid;
+};
+
+int sem_lock(int sem_id, unsigned short sem_num) {
+  struct sembuf op = {sem_num, -1, SEM_UNDO};
+  return semop(sem_id, &op, 1);
+};
+
+int sem_unlock(int sem_id, unsigned short sem_num) {
+  struct sembuf op = {sem_num, 1, SEM_UNDO};
+  return semop(sem_id, &op, 1);
+};
+
+int sem_destroy(int sem_id) {
+  return semctl(sem_id, 0, IPC_RMID);
+};
