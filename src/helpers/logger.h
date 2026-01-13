@@ -36,6 +36,7 @@ typedef struct {
  */
 Logger* logger_create(key_t id, const char* path, LogLevel level);
 
-int logger_log(key_t msgid, const char* message, LogLevel level);
+int logger_log(int msgid, const char* message, LogLevel level);
+int logger_log_key(key_t msgid, const char* message, LogLevel level);
 
 void logger_destroy(Logger* logger);

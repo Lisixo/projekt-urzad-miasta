@@ -5,6 +5,8 @@
 #include <sys/msg.h>
 #include <time.h>
 #include "sync.h"
+#include <errno.h>
+#include <sys/stat.h>
 
 void* logger_loop(void* arg) {
   Logger* l = (Logger*)arg;
@@ -77,20 +79,13 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
     return NULL;
   }
 
-  logger_log(id, "logger thread started", LOG_DEBUG);
+  logger_log(logger->msgid, "logger thread started", LOG_DEBUG);
 
   return logger;
 }
 
-int logger_log(key_t id, const char* message, LogLevel level) {
+int logger_log(int msgid, const char* message, LogLevel level) {
   log_msg_t m;
-  int msgid = msgget(id, SYNC_PERM);
-
-  if(msgid == -1){
-    perror("logger_log: failed to open message queue ::");
-    return -1;
-  }
-
   char prefix[32];
   char tm[20];
   time_t now = time(NULL);
@@ -112,7 +107,26 @@ int logger_log(key_t id, const char* message, LogLevel level) {
     return -1;
   }
 
+  if(level == LOG_ERROR && errno != 0) {
+    fprintf(stderr, "%s (errnomsg: %s) \n", m.mtext, strerror(errno));
+  }
+  else {
+    printf("%s\n", m.mtext);
+  }
+
   return 0;
+}
+
+int logger_log_key(key_t id, const char* message, LogLevel level) {
+  log_msg_t m;
+  int msgid = msgget(id, SYNC_PERM);
+
+  if(msgid == -1){
+    perror("logger_log: failed to open message queue ::");
+    return -1;
+  }
+
+  return logger_log(msgid, message, level);
 }
 
 void logger_destroy(Logger* logger) {
@@ -120,7 +134,7 @@ void logger_destroy(Logger* logger) {
     return;
     
   logger->running = 0;
-  logger_log(logger->key, "logger thread stoped", LOG_DEBUG);
+  logger_log(logger->msgid, "logger thread stoped", LOG_DEBUG);
     
   pthread_join(logger->thread, NULL);
   sync_msg_destroy(logger->msgid);

@@ -16,10 +16,11 @@ key_t uniq_key(const char key);
 
 // MESSAGE QUEUES
 
-/**
- * Odbiera wiadomość z kolejki
- */
-int sync_msg_receive(int msgid, void *msg_ptr, int size, long type);
+// /**
+//  * Tworzy kolejke wiadomosci
+//  * @param key identyfikator kolejki
+//  */
+int sync_msg_create(key_t key);
 
 /**
  * Niszczy kolejke

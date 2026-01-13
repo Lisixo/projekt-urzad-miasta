@@ -1,6 +1,13 @@
 #define KEY_MAIN_LOGGER 'L'
 #define KEY_SHM_URZAD 'U'
 #define KEY_SHM_PETENT_LIMIT 'P'
+#define KEY_SHM_SEMLOCK 'Q'
+
+#define DYREKTOR_MAX_LOBBY 100
+#define DYREKTOR_TIME_OPEN 12*60*60
+#define DYREKTOR_TIME_CLOSE 16*60*60
+#define PETENT_COUNT 1000
+#define PETENT_DIFF 100
 
 // shared structures
 typedef enum {
@@ -13,18 +20,18 @@ typedef enum {
 
 struct petent_limit {
     int sc, km, ml, pd, sa;
-    int sc_max, km_max, ml_max, pd_max, sa_max;
     int semlock;
+    int semlock_idx;
 };
 typedef struct petent_limit petent_limit_t;
 
 struct stan_urzedu {
     int semlock;
+    int semlock_idx;
 
     int time_open; // Tp
     int time_close; // Tk
 
-    int current_time;
     int is_opened;
 
     int lobby_size; // N_MAX
@@ -32,3 +39,4 @@ struct stan_urzedu {
 
     int queue_count; // K
 };
+typedef struct stan_urzedu stan_urzedu_t;
