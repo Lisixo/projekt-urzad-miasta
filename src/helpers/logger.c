@@ -21,8 +21,10 @@ void* logger_loop(void* arg) {
       continue;
     }
 
-    fprintf(l->file, "%s\n", buf.mtext);
-    fflush(l->file);
+    fprintf(l->latestfile, "%s\n", buf.mtext);
+    fflush(l->latestfile);
+    fprintf(l->historyfile, "%s\n", buf.mtext);
+    fflush(l->historyfile);
   }
 
   return NULL;
@@ -57,10 +59,37 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
     return NULL;
   } 
 
-  logger->file = fopen(path, "a");
+  // make path for root folder
+  char rootpath[512];
+  if (path[strlen(path) - 1] != '/'){
+    snprintf(rootpath, sizeof(rootpath), "%s%c", path, '/');
+  }
+  else {
+    snprintf(rootpath, sizeof(rootpath), "%s", path);
+  }
 
-  if(!logger->file) {
-    perror("logger_create: failed to open file ::");
+  // init latest file
+  char latestfilepath[512];
+  snprintf(latestfilepath, sizeof(latestfilepath), "%slatest.txt", rootpath);
+
+  logger->latestfile = fopen(latestfilepath, "w");
+
+  if(!logger->latestfile) {
+    perror("logger_create: failed to open latestfile ::");
+    sync_msg_destroy(logger->msgid);
+    free(logger);
+    return NULL;
+  }
+
+  // init latest file
+  char historyfilepath[512];
+  snprintf(historyfilepath, sizeof(historyfilepath), "%s%ld.txt", rootpath, (long)time(NULL));
+
+  logger->historyfile = fopen(historyfilepath, "w");
+
+  if(!logger->historyfile) {
+    perror("logger_create: failed to open historyfile ::");
+    fclose(logger->latestfile);
     sync_msg_destroy(logger->msgid);
     free(logger);
     return NULL;
@@ -73,7 +102,8 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
   if(pthread_create(&logger->thread, NULL, logger_loop, logger) != 0) {
     perror("logger_create: failed to create THREAD ::");
 
-    fclose(logger->file);
+    fclose(logger->latestfile);
+    fclose(logger->historyfile);
     sync_msg_destroy(logger->msgid);
     free(logger);
     return NULL;
@@ -84,6 +114,9 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
   return logger;
 }
 
+/**
+ * Wyslij wiadomosc do watku loggera
+ */
 int logger_log(int msgid, const char* message, LogLevel level) {
   log_msg_t m;
   char prefix[32];
@@ -138,6 +171,7 @@ void logger_destroy(Logger* logger) {
     
   pthread_join(logger->thread, NULL);
   sync_msg_destroy(logger->msgid);
-  fclose(logger->file);
+  fclose(logger->latestfile);
+  fclose(logger->historyfile);
   free(logger);
 }

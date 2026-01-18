@@ -20,7 +20,8 @@ typedef struct log_msg {
 
 typedef struct {
   int msgid;
-  FILE* file;
+  FILE* latestfile;
+  FILE* historyfile;
   pthread_t thread;
   int running;
   LogLevel level;
@@ -29,8 +30,8 @@ typedef struct {
 
 /**
  * Tworzy nowy logger
- * @param file identyfikator kolejki
- * @param file wskaznik do pliku
+ * @param latestfile identyfikator kolejki
+ * @param latestfile wskaznik do pliku
  * @param level poziom logowania
  * @return id kolejki wiadomosci
  */
