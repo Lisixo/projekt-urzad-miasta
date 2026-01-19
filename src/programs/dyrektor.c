@@ -6,11 +6,20 @@
 #include <sys/sem.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/signal.h>
 #include "helpers/consts.h"
 #include "helpers/sync.h"
 #include "helpers/logger.h"
 
 void wygeneruj_stan_urzedu(stan_urzedu_t *urzad);
+
+void wyslij_sygnal_1(pid_t pid) {
+  kill(pid, SIGUSR1);
+}
+
+void wyslij_sygnal_2() {
+  kill(0, SIGUSR2);
+}
 
 int main() {
   srand(time(NULL));
@@ -97,16 +106,43 @@ int main() {
     }
   }
 
-  // Working time
+  // WORKING TIME
   logger_log(logger_id, "[dyrektor] Urzad zostal otwarty", LOG_INFO);
   while(time(NULL) < urzad->time_close){
     sleep(1);
+
+    // Event 1: Zwolnienie pracownika szybciej do domu
+    if(rand() % 2000 == 0) {
+      sem_lock(urzad->semlock, urzad->semlock_idx);
+      pid_t p = urzad->urzednicy_pids[p % 7];
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
+      wyslij_sygnal_1(p);
+    }
+    // Event 1: Zwolnienie pracownika szybciej do domu
+    if(rand() % 2000 == 0) {
+      wyslij_sygnal_2();
+      break;
+    }
   }
 
   // Set close flag
   sem_lock(urzad->semlock, urzad->semlock_idx);
   urzad->is_opened = 0;
   sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+  // Close lobby
+  {
+    union semun {
+      int val;
+      struct semid_ds *buf;
+      unsigned short *array;
+    } arg;
+    arg.val = 0;
+    if(semctl(petentl->limit_sem, petentl->lobby, SETVAL, arg) == -1) {
+      logger_log(logger_id, "[dyrektor] Nie mozna zamknac lobby", LOG_ERROR);
+      exit(1);
+    }
+  }
 
   logger_log(logger_id, "[dyrektor] Zakonczono procedure dyrektor", LOG_INFO);
   return 0;

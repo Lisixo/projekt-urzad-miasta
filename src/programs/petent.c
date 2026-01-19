@@ -6,6 +6,7 @@
 #include <sys/sem.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/signal.h>
 #include "helpers/consts.h"
 #include "helpers/sync.h"
 #include "helpers/logger.h"
@@ -55,9 +56,18 @@ int dodaj_bilet(petent_t *p, msg_ticket_t tck) {
   return 0;
 }
 
+int czy_sygnal_2 = 0;
+
+void signal2handler(int sig) {
+  if(czy_sygnal_2 == 0){
+    czy_sygnal_2 = 1;
+  }
+}
+
 int main() {
   // random seed based on getpid() because time(NULL) will be same for all customers
   srand(getpid());
+  signal(SIGUSR2, signal2handler);
 
   // attach logger
   int logger_id = msgget(uniq_key(KEY_MAIN_LOGGER), SYNC_PERM);
@@ -150,9 +160,8 @@ int main() {
     logger_log(logger_id, txt, LOG_DEBUG);
   }
 
-  // printf("\n%d -> %ld : %ld\n", getpid(), time(NULL), arrive_time);
   // wait for opening and arrival
-  while(urzad->is_opened != 1 || time(NULL) > arrive_time){
+  while(urzad->is_opened != 1 && time(NULL) > arrive_time){
     sleep(5);
   }
 
@@ -160,9 +169,9 @@ int main() {
   int people_count = petent->ma_dziecko ? 2 : 1;
   {
     if(sem_lock_multi(petentl->limit_sem, petentl->lobby, people_count) == -1) {
-      logger_log(logger_id, "[petent] Nie moge zajac miejsca w lobby. Wracam do domu", LOG_ERROR);
+      logger_log(logger_id, "[petent] Nie moge zajac miejsca w budynku. Wracam do domu", LOG_ERROR);
       shutdown(petent);
-      return 1;
+      return 0;
     }
   }
 
@@ -191,6 +200,30 @@ int main() {
   logger_log(logger_id, "[petent/ticket] Czekam w kolejce bilet", LOG_INFO);
 
   if(msgrcv(rejestracjamsgid, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent->pid, 0) == -1) {
+    sem_lock(urzad->semlock, urzad->semlock_idx);
+    int is_opened = urzad->is_opened;
+    sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+    // Logika sygnalu 2
+    if(czy_sygnal_2) {
+      logger_log(logger_id, "[petent/signal] Dostalem sygnal zeby uciekac z budynku", LOG_INFO);
+      sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count);
+      shutdown(petent);
+      exit(0);
+    }
+    // Logika zamkniecia urzedu w trakcie zalatwiania sprawy
+    else if(is_opened == 0) {
+      sem_lock(urzad->semlock, urzad->semlock_idx);
+      urzad->ticket_queue--; // zwalnianie miejsca w kolejce
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+      sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count); // zwalnianie miejsca w budynku
+
+      logger_log(logger_id, "[petent] Urzad sie zamknal zanim zalatwilem swoja sprawe", LOG_INFO);
+      sleep(120);
+      logger_log(logger_id, "[petent] Jestem sfustrowany", LOG_INFO);
+    }
+    // Logika wylaczania
     logger_log(logger_id, "[petent/ticket] Nie moge odebrac biletu", LOG_ERROR);
     shutdown(petent);
     exit(1);
@@ -238,6 +271,26 @@ int main() {
 
     // Oczekiwanie na wejscie i oczekiwanie na zalatwienie sprawy lub otrzymanie nowego biletu
     if(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent->pid, 0) == -1) {
+      sem_lock(urzad->semlock, urzad->semlock_idx);
+      int is_opened = urzad->is_opened;
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+      // Logika sygnalu 2
+      if(czy_sygnal_2) {
+        logger_log(logger_id, "[petent/signal] Dostalem sygnal zeby uciekac z budynku", LOG_INFO);
+        sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count);
+        shutdown(petent);
+        exit(0);
+      }
+      // Logika zamkniecia urzedu w trakcie zalatwiania sprawy
+      else if(is_opened == 0) {
+        sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count); // zwalnianie miejsca w budynku
+
+        logger_log(logger_id, "[petent] Urzad sie zamknal zanim zalatwilem swoja sprawe", LOG_INFO);
+        sleep(120);
+        logger_log(logger_id, "[petent] Jestem sfustrowany", LOG_INFO);
+      }
+      // Logika wylaczania
       logger_log(logger_id, "[petent/urzednik] Nie moge otrzymac nowego biletu od urzednika", LOG_ERROR);
       shutdown(petent);
       exit(1);

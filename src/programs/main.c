@@ -299,6 +299,9 @@ int main() {
 
   shmdt(pt);
 
+  stan_urzedu_t *u;
+  u = shmat(res->stan_urzedu_shm, NULL, 0);
+
   for(int i=0; i<6; i++) {
     pid_t pid = fork();
     switch(pid) {
@@ -316,8 +319,13 @@ int main() {
         logger_log(res->log->msgid, "[main/init/urzednik] Nie mozna uruchomic procedury", LOG_ERROR);
         shutdown(res);
         break;
+      default:
+        sem_lock(u->semlock, u->semlock_idx);
+        u->urzednicy_pids[i] = pid;
+        sem_unlock(u->semlock, u->semlock_idx);
     }
   }
+  shmdt(u);
 
   // fork customers
   generate_customers(res, PETENT_COUNT);

@@ -55,6 +55,7 @@ struct stan_urzedu {
   int is_opened; // Czy urzad jest otwarty
   int is_operating; // Czy urzad jest funkcjonujacy (czy dyrektor oglosil godziny otwarcia)
 
+  pid_t urzednicy_pids[7];
   int ticket_queue;
 };
 typedef struct stan_urzedu stan_urzedu_t;
@@ -70,8 +71,24 @@ struct msg_ticket{
 typedef struct msg_ticket msg_ticket_t;
 
 struct raport_dnia {
-  msg_ticket_t **ticket;
-  msg_ticket_t **ticket_success;
-  msg_ticket_t **ticket_failed;
+  int semlock;
+  int semlock_idx;
+
+  int petent_count;
+
+  int sa_count;
+  int sc_count;
+  int km_count;
+  int ml_count;
+  int pd_count;
+  int cashier_count;
+
+  int ticket_count;
+
+  msg_ticket_t *ticket_success;
+  int ticket_success_count;
+
+  msg_ticket_t *ticket_failed;
+  int ticket_failed_count;
 };
 typedef struct raport_dnia raport_dnia_t;

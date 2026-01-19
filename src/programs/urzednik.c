@@ -6,6 +6,7 @@
 #include <sys/sem.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/signal.h>
 #include "helpers/consts.h"
 #include "helpers/sync.h"
 #include "helpers/logger.h"
@@ -14,8 +15,17 @@
 
 #define PRIORITY_OFFSET 10
 
+int czy_sygnal_1 = 0;
+
+void signal1handler(int sig) {
+  if(czy_sygnal_1 == 0){
+    czy_sygnal_1 = 1;
+  }
+}
+
 int main(int argc, char* argv[]) {
   srand(getpid());
+  signal(SIGUSR1, signal1handler);
 
   if(argc != 3){
     printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY SEMLOCK_IDX");
@@ -175,27 +185,28 @@ int main(int argc, char* argv[]) {
 
     // zmiejszanie puli dziennych petentow lub koniec pracy (tylko gdy ma sie idx semlocka)
     struct sembuf op = {petentl_semlockidx, -1, IPC_NOWAIT};
-    if(petentl_semlockidx != 0 && semop(petentl->limit_sem, &op, 1) == -1){
-      if(errno == EAGAIN) {
-        logger_log(logger_id, "Osiagnalem limit petentow. Koncze na dzisiaj prace", LOG_INFO);
+    if(
+      (petentl_semlockidx != 0 && semop(petentl->limit_sem, &op, 1) == -1 && errno == EAGAIN)
+      || czy_sygnal_1
+    ){
+      logger_log(logger_id, "Koncze na dzisiaj prace", LOG_INFO);
 
-        union semun {
-          int val;
-          struct semid_ds *buf;
-          unsigned short *array;
-        } arg;
+      union semun {
+        int val;
+        struct semid_ds *buf;
+        unsigned short *array;
+      } arg;
 
-        // Lock queue and reject all
-        arg.val = 0;
-        semctl(petentl->limit_sem, petentl_semlockidx, SETVAL, arg);
+      // Lock queue and reject all
+      arg.val = 0;
+      semctl(petentl->limit_sem, petentl_semlockidx, SETVAL, arg);
 
-        while(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), petentl_semlockidx, IPC_NOWAIT) != -1){
-          tck.mtype = tck.requester;
-          tck.ticketid = -1;
-          msgsnd(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
-        }
-        break;
+      while(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), petentl_semlockidx, IPC_NOWAIT) != -1){
+        tck.mtype = tck.requester;
+        tck.ticketid = -1;
+        msgsnd(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
       }
+      break;
     }
     sleep(1);
   }
