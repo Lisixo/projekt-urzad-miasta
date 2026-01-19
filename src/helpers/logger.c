@@ -1,5 +1,7 @@
 #include "logger.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <string.h>
 #include <sys/msg.h>
@@ -119,7 +121,7 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
  */
 int logger_log(int msgid, const char* message, LogLevel level) {
   log_msg_t m;
-  char prefix[32];
+  char prefix[64];
   char tm[20];
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
@@ -131,7 +133,7 @@ int logger_log(int msgid, const char* message, LogLevel level) {
   }
 
   strftime(tm, sizeof(tm), "%Y-%m-%d %H:%M:%S", t);
-  snprintf(prefix, sizeof(prefix), "[%s][%s]", level_to_str(level), tm);
+  snprintf(prefix, sizeof(prefix), "[%s][%s][PID:%d]", level_to_str(level), tm, getpid());
 
   snprintf(m.mtext, sizeof(m.mtext), "%s %s", prefix, message);
 

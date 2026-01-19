@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include <signal.h>
 
 typedef struct {
@@ -13,6 +14,8 @@ typedef struct {
   int semlock_ins;
   int stan_urzedu_shm;
   int petent_limit_shm;
+  int rejestracja_msg;
+  int urzednicy_msg;
 } res_t;
 
 void free_res(res_t* res);
@@ -61,6 +64,8 @@ res_t* alloc_res() {
     urzad->is_operating = 0;
     urzad->time_close = 0;
     urzad->time_open = 0;
+
+    urzad->ticket_queue = 0;
     
     sem_unlock(urzad->semlock, urzad->semlock_idx);
     shmdt(urzad);
@@ -86,7 +91,7 @@ res_t* alloc_res() {
 
     // setup limit semaphor
     int limit_sem_counter = 0;
-    l->limit_sem = sem_create(uniq_key(KEY_SEM_LIMITS), 7, 1);
+    l->limit_sem = sem_create(uniq_key(KEY_SEM_LIMITS), 8, 1);
     if(l->limit_sem == -1) {
       logger_log(res->log->msgid, "[main/alloc] Nie mozna utworzyc petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
@@ -103,7 +108,7 @@ res_t* alloc_res() {
     l->km = limit_sem_counter++;
     arg.val = l->km_max;
     if(semctl(l->limit_sem, l->km, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(km) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
 
@@ -111,7 +116,7 @@ res_t* alloc_res() {
     l->pd = limit_sem_counter++;
     arg.val = l->pd_max;
     if(semctl(l->limit_sem, l->pd, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(pd) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
 
@@ -119,7 +124,7 @@ res_t* alloc_res() {
     l->ml = limit_sem_counter++;
     arg.val = l->ml_max;
     if(semctl(l->limit_sem, l->ml, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(ml) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
 
@@ -127,7 +132,7 @@ res_t* alloc_res() {
     l->sc = limit_sem_counter++;
     arg.val = l->sc_max;
     if(semctl(l->limit_sem, l->sc, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(sc) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
     
@@ -138,23 +143,40 @@ res_t* alloc_res() {
     int sa_half = l->sa_max / 2;
     arg.val = sa_half;
     if(semctl(l->limit_sem, l->sa1, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(sa1) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
 
     l->sa2 = limit_sem_counter++;
     arg.val = l->sa_max - sa_half;
     if(semctl(l->limit_sem, l->sa2, SETVAL, arg) == -1) {
-      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem SEM. Zwalnianie zasobow\n", LOG_ERROR);
+      logger_log(res->log->msgid, "[main/alloc] Nie mozna zmienic wartosci petent_limit->limit_sem(sa2) SEM. Zwalnianie zasobow\n", LOG_ERROR);
       shutdown(res);
     }
 
     // setup max lobby size
+    // is initialized properly in dyrektor.c when urzad is opened
     l->lobby_max = DYREKTOR_MAX_LOBBY;
     l->lobby = limit_sem_counter++;
+
+    l->ticket_count = 0;
     
     sem_unlock(l->semlock, l->semlock_idx);
     shmdt(l);
+  }
+
+  // rejestracja msg init
+  res->rejestracja_msg = msgget(uniq_key(KEY_MSG_TICKETS), SYNC_PERM | IPC_CREAT | IPC_EXCL);
+  if(res->rejestracja_msg == -1) {
+    logger_log(res->log->msgid, "[main/alloc] Nie mozna utworzyc rejestracja MSG. Zwalnianie zasobow\n", LOG_ERROR);
+    shutdown(res);
+  }
+
+  // urzednik msg init
+  res->urzednicy_msg = msgget(uniq_key(KEY_MSG_WORKER), SYNC_PERM | IPC_CREAT | IPC_EXCL);
+  if(res->urzednicy_msg == -1) {
+    logger_log(res->log->msgid, "[main/alloc] Nie mozna utworzyc urzednicy MSG. Zwalnianie zasobow\n", LOG_ERROR);
+    shutdown(res);
   }
 
   logger_log(res->log->msgid, "[main/alloc] success", LOG_DEBUG);
@@ -193,6 +215,18 @@ void free_res(res_t* res) {
       logger_log(res->log->msgid, "[main/free] Nie mozna usunac stan_urzedu shm\n", LOG_ERROR);
     }
   }
+  // free rejestracja_msg
+  if(res->rejestracja_msg) {
+    if(msgctl(res->rejestracja_msg, IPC_RMID, NULL) == -1){
+      logger_log(res->log->msgid, "[main/free] Nie mozna usunac rejestracja msg\n", LOG_ERROR);
+    }
+  }
+  // free urzednicy_msg
+  if(res->urzednicy_msg) {
+    if(msgctl(res->urzednicy_msg, IPC_RMID, NULL) == -1){
+      logger_log(res->log->msgid, "[main/free] Nie mozna usunac urzednicy msg\n", LOG_ERROR);
+    }
+  }
   
   // destroy logger
   if(res->log) {
@@ -222,8 +256,7 @@ int main() {
   signal(SIGINT, exit_signal_handler);
   res = alloc_res();
 
-  sleep(1);
-
+  // fork dyrektor
   pid_t dyrektor_pid = fork();
   switch(dyrektor_pid) {
     case -1:
@@ -238,6 +271,55 @@ int main() {
       break;
   }
 
+  // fork tickets machines
+  for(int i=1; i<=3; i++) {
+    pid_t pid = fork();
+    switch(pid) {
+      case -1:
+        logger_log(res->log->msgid, "[main/init/rejestracja] Nie mozna utworzyc PID", LOG_ERROR);
+        shutdown(res);
+        break;
+      case 0:
+        char machine_id[16];
+        snprintf(machine_id, sizeof(machine_id), "%d", i);
+        execl("./rejestracja", "rejestracja", machine_id, (char *)NULL);
+
+        logger_log(res->log->msgid, "[main/init/rejestracja] Nie mozna uruchomic procedury", LOG_ERROR);
+        shutdown(res);
+        break;
+    }
+  }
+
+  // fork workers
+  petent_limit_t *pt;
+  pt = shmat(res->petent_limit_shm, NULL, 0);
+
+  FacultyType workertypes[] = {FACULTY_KM, FACULTY_PD, FACULTY_ML, FACULTY_SC, FACULTY_SA, FACULTY_SA, CASHIER_POINT};
+  int flockidx[] = {pt->km, pt->pd, pt->ml, pt->sc, pt->sa1, pt->sa2, 0};
+
+  shmdt(pt);
+
+  for(int i=0; i<6; i++) {
+    pid_t pid = fork();
+    switch(pid) {
+      case -1:
+        logger_log(res->log->msgid, "[main/init/urzednik] Nie mozna utworzyc PID", LOG_ERROR);
+        shutdown(res);
+        break;
+      case 0:
+        char faculty[4];
+        snprintf(faculty, sizeof(faculty), "%d", workertypes[i]);
+        char semlckidx[4];
+        snprintf(semlckidx, sizeof(semlckidx), "%d", flockidx[i]);
+        execl("./urzednik", "urzednik", faculty, semlckidx, (char *)NULL);
+
+        logger_log(res->log->msgid, "[main/init/urzednik] Nie mozna uruchomic procedury", LOG_ERROR);
+        shutdown(res);
+        break;
+    }
+  }
+
+  // fork customers
   generate_customers(res, PETENT_COUNT);
 
   int status;

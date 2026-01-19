@@ -48,12 +48,20 @@ int sem_create(key_t id, int size, int default_state) {
 };
 
 int sem_lock(int sem_id, unsigned short sem_num) {
-  struct sembuf op = {sem_num, -1, SEM_UNDO};
-  return semop(sem_id, &op, 1);
+  return sem_lock_multi(sem_id, sem_num, 1);
 };
 
 int sem_unlock(int sem_id, unsigned short sem_num) {
-  struct sembuf op = {sem_num, 1, SEM_UNDO};
+  return sem_unlock_multi(sem_id, sem_num, 1);
+};
+
+int sem_lock_multi(int sem_id, unsigned short sem_num, int count) {
+  struct sembuf op = {sem_num, count * -1, 0};
+  return semop(sem_id, &op, 1);
+};
+
+int sem_unlock_multi(int sem_id, unsigned short sem_num, int count) {
+  struct sembuf op = {sem_num, count, 0};
   return semop(sem_id, &op, 1);
 };
 

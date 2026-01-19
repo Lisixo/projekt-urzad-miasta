@@ -103,6 +103,11 @@ int main() {
     sleep(1);
   }
 
+  // Set close flag
+  sem_lock(urzad->semlock, urzad->semlock_idx);
+  urzad->is_opened = 0;
+  sem_unlock(urzad->semlock, urzad->semlock_idx);
+
   logger_log(logger_id, "[dyrektor] Zakonczono procedure dyrektor", LOG_INFO);
   return 0;
 }
@@ -111,9 +116,11 @@ void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
   time_t now = time(NULL);
 
   if(urzad->time_open != -1) {    
-    urzad->time_open = now + (((rand() % 5)+1)*60); // open in 1-5 minutes
+    // urzad->time_open = now + (((rand() % 5)+1)*60); // open in 1-5 minutes
+    urzad->time_open = now + 10; // instant
   }
   if(urzad->time_close != -1) {
-    urzad->time_close = urzad->time_open + (((rand() % 110)+10)*60); // left open for 10-120 minutes
+    // urzad->time_close = urzad->time_open + (((rand() % 110)+10)*60); // left open for 10-120 minutes
+    urzad->time_close = urzad->time_open + 5*60; // always 5 minutes
   }
 }

@@ -35,4 +35,8 @@ int sem_lock(int sem_id, unsigned short sem_num);
 
 int sem_unlock(int sem_id, unsigned short sem_num);
 
+int sem_lock_multi(int sem_id, unsigned short sem_num, int count);
+
+int sem_unlock_multi(int sem_id, unsigned short sem_num, int count);
+
 int sem_destroy(int sem_id);
