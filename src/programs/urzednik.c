@@ -13,22 +13,19 @@
 #include "helpers/utils.h"
 #include <errno.h>
 
-#define PRIORITY_OFFSET 10
-
-int czy_sygnal_1 = 0;
+volatile sig_atomic_t sig1;
 
 void signal1handler(int sig) {
-  if(czy_sygnal_1 == 0){
-    czy_sygnal_1 = 1;
-  }
+  sig1 = 1;
 }
 
 int main(int argc, char* argv[]) {
   srand(getpid());
   signal(SIGUSR1, signal1handler);
+  signal(SIGUSR2, SIG_IGN);
 
-  if(argc != 3){
-    printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY SEMLOCK_IDX");
+  if(argc != 4){
+    printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY QUEUE_SEMLOCK LIMIT_SEMLOCK");
     return 1;
   }
   
@@ -45,9 +42,14 @@ int main(int argc, char* argv[]) {
     }
     type = (FacultyType)temp_type;
   }
-  int petentl_semlockidx;
-  if(sscanf(argv[2], "%d", &petentl_semlockidx) != 1) {
-    fprintf(stderr, "[urzednik/argv] Niepoprawny argument SEMLOCK_IDX (required: int)");
+  int queue_semlock_idx;
+  if(sscanf(argv[2], "%d", &queue_semlock_idx) != 1) {
+    fprintf(stderr, "[urzednik/argv] Niepoprawny argument QUEUE_SEMLOCK (required: int)");
+    return 1;
+  }
+  int limit_semlock_idx;
+  if(sscanf(argv[3], "%d", &limit_semlock_idx) != 1) {
+    fprintf(stderr, "[urzednik/argv] Niepoprawny argument LIMIT_SEMLOCK (required: int)");
     return 1;
   }
 
@@ -69,21 +71,10 @@ int main(int argc, char* argv[]) {
     urzad = shmat(stan_urzedu_shmid, NULL, 0);
   }
 
-  // attach petent_limit
-  petent_limit_t *petentl;
-  {
-    int petent_limit_shmid = shmget(uniq_key(KEY_SHM_PETENT_LIMIT), sizeof(petent_limit_t), SYNC_PERM);
-    if(petent_limit_shmid == -1) {
-      logger_log(logger_id, "[urzednik/init] Nie mozna otworzyc petent_limit", LOG_ERROR);
-      exit(1);
-    }
-    petentl = shmat(petent_limit_shmid, NULL, 0);
-  }
-
   // attach urzednik msg
-  int urzednikmsgid = msgget(uniq_key(KEY_MSG_WORKER), SYNC_PERM);
-  if(urzednikmsgid == -1) {
-    logger_log(logger_id, "[urzednik/init] Nie mozna otworzyc urzednik_msg MSG", LOG_ERROR);
+  int global_msg_id = msgget(uniq_key(KEY_MSG_GLOBAL), SYNC_PERM);
+  if(global_msg_id == -1) {
+    logger_log(logger_id, "[urzednik/init] Nie mozna otworzyc global MSG", LOG_ERROR);
     exit(1);
   }
 
@@ -93,18 +84,13 @@ int main(int argc, char* argv[]) {
     logger_log(logger_id, txt, LOG_INFO);
   }
 
-  // setup default value for is_opened urzad
-  sem_lock(urzad->semlock, urzad->semlock_idx);
-  int urzad_is_opened = urzad->is_opened;
-  sem_unlock(urzad->semlock, urzad->semlock_idx);
-
   // wait for urzad to be opened
-  while(urzad_is_opened == 0){
-    sem_lock(urzad->semlock, urzad->semlock_idx);
-    urzad_is_opened = urzad->is_opened;
-    sem_unlock(urzad->semlock, urzad->semlock_idx);
-    sleep(1);
-  }
+  sem_lock(urzad->semlock, urzad->sems.opened);
+  sem_unlock(urzad->semlock, urzad->sems.opened);
+  int urzad_is_opened = 1;
+
+  // open for clients
+  sem_unlock(urzad->semlock, queue_semlock_idx);
 
   {
     char txt[192];
@@ -112,104 +98,162 @@ int main(int argc, char* argv[]) {
     logger_log(logger_id, txt, LOG_INFO);
   }
 
+  int should_work = 1;
+
   // main loop
-  while(urzad_is_opened) {
+  while(should_work) {
     // odswiezanie stanu otwarcia urzedu
     sem_lock(urzad->semlock, urzad->semlock_idx);
     urzad_is_opened = urzad->is_opened;
     sem_unlock(urzad->semlock, urzad->semlock_idx);
 
+    switch(urzad_is_opened) {
+      case -1:
+        logger_log(logger_id, "[urzednik/loop] Nie moge sprawdzic stanu urzedu", LOG_ERROR);
+        should_work = 0;
+      case 0:
+        should_work = 0;
+        break;
+    }
+
     // wejscie petenta
     msg_ticket_t tck;
-    if(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), type + PRIORITY_OFFSET, IPC_NOWAIT) == -1){
+    int vip = 0;
+    if(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_PRIORITY_OFFSET, IPC_NOWAIT) == -1){
       if(errno != ENOMSG) {
         logger_log(logger_id, "Nie mozna pobrac informacji z kolejki urzednicy msg", LOG_ERROR);
         exit(1);
       }
-      if(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), type, IPC_NOWAIT) == -1) {
-        sleep(1);
+      if(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_OFFSET, IPC_NOWAIT) == -1) {
+        sync_sleep(1);
         continue;
       }
+      else {
+        vip = 0;
+      }
+    }
+    else {
+      vip = 1;
     }
 
-    sleep((rand() % 5) + 5); // symulacja zalatwiania sprawy dla petenta przez 5-10 sekund
+    {
+      char txt[128];
+      snprintf(txt, sizeof(txt), "[urzednik][%s] Przyjmuje petenta %d", faculty_to_str(type), tck.requester);
+      logger_log(logger_id, txt, LOG_INFO);
+    }
+
+    sync_sleep((rand() % 5) + 5); // symulacja zalatwiania sprawy dla petenta przez 5-10 sekund
 
     if(type == FACULTY_SA && rand() % 100 < 40) {
       tck.redirected_from = tck.facultytype;
+      int limit_idx;
+
+      int status = 0;
+      struct sembuf op;
+      op.sem_flg = IPC_NOWAIT;
+      op.sem_op = -1;
 
       switch(rand() % 4) {
         case 0:
-          tck.mtype = FACULTY_KM;
+          op.sem_num = urzad->sems.km_limit;
+          tck.facultytype = FACULTY_KM;
           break;
         case 1:
-          tck.mtype = FACULTY_ML;
+          op.sem_num = urzad->sems.ml_limit;
+          tck.facultytype = FACULTY_ML;
           break;
         case 2:
-          tck.mtype = FACULTY_PD;
+          op.sem_num = urzad->sems.pd_limit;
+          tck.facultytype = FACULTY_PD;
           break;
         case 3:
-          tck.mtype = FACULTY_SC;
+          op.sem_num = urzad->sems.sc_limit;
+          tck.facultytype = FACULTY_SC;
           break;
       }
+      
+      if(semop(urzad->semlock, &op, 1) == -1) {
+        logger_log(logger_id, "[urzednik/przekierowanie] Limit zostal osiagniety", LOG_WARNING);
+        tck.ticketid = -1;
+        tck.queueid = 0;
+      }
+      else {
+        tck.redirected_from = FACULTY_SA;
+        tck.queueid = tck.facultytype + (vip == 1 ? D_MSG_WORKER_PRIORITY_OFFSET : D_MSG_WORKER_OFFSET);
+      }
+
     }
     else if(type != FACULTY_SA && type != CASHIER_POINT && tck.payment == PAYMENT_NOT_NEEDED && rand() % 10 == 0){
       tck.payment = PAYMENT_NEEDED;
 
       tck.redirected_from = tck.facultytype;
-      tck.mtype = CASHIER_POINT;
+      tck.queueid = CASHIER_POINT + (vip == 1 ? D_MSG_WORKER_PRIORITY_OFFSET : D_MSG_WORKER_OFFSET);
     }
     else if(type == CASHIER_POINT) {
       tck.payment = PAYMENT_SUCCESS;
       tck.facultytype = tck.redirected_from;
-      tck.redirected_from = CASHIER_POINT;
-      tck.mtype = tck.redirected_from + PRIORITY_OFFSET;
+      tck.queueid = tck.redirected_from + D_MSG_WORKER_PRIORITY_OFFSET;
     }
     else {
       tck.facultytype = 0;
+      tck.queueid = 0;
     }
 
-    // {
-    //   char txt[192];
-    //   snprintf(txt, sizeof(txt), "[urzednik][%s] blokada 1", faculty_to_str(type));
-    //   logger_log(logger_id, txt, LOG_INFO);
-    // }
-
-    sem_lock(petentl->semlock, petentl->semlock_idx);
-    tck.ticketid = ++petentl->ticket_count;
-    sem_unlock(petentl->semlock, petentl->semlock_idx);
+    // nowy numer biletu
+    if(tck.ticketid != -1) {
+      sem_lock(urzad->semlock, urzad->semlock_idx);
+      tck.ticketid = ++urzad->taken_ticket_count;
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
+    }
 
     tck.mtype = tck.requester;
-    if(msgsnd(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1) {
+    if(msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1) {
       logger_log(logger_id, "[urzednik] Nie mozna wyslac biletu do petenta", LOG_WARNING);
     };
 
     // zmiejszanie puli dziennych petentow lub koniec pracy (tylko gdy ma sie idx semlocka)
-    struct sembuf op = {petentl_semlockidx, -1, IPC_NOWAIT};
-    if(
-      (petentl_semlockidx != 0 && semop(petentl->limit_sem, &op, 1) == -1 && errno == EAGAIN)
-      || czy_sygnal_1
-    ){
-      logger_log(logger_id, "Koncze na dzisiaj prace", LOG_INFO);
-
-      union semun {
-        int val;
-        struct semid_ds *buf;
-        unsigned short *array;
-      } arg;
-
-      // Lock queue and reject all
-      arg.val = 0;
-      semctl(petentl->limit_sem, petentl_semlockidx, SETVAL, arg);
-
-      while(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), petentl_semlockidx, IPC_NOWAIT) != -1){
-        tck.mtype = tck.requester;
-        tck.ticketid = -1;
-        msgsnd(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
-      }
-      break;
-    }
-    sleep(1);
+    // struct sembuf op = {limit_semlock_idx, -1, IPC_NOWAIT};
+    // if(
+    //   (semop(urzad->semlock, &op, 1) == -1 && errno == EAGAIN)
+    //   || czy_sygnal_1
+    // ){
+    //   {
+    //     char txt[128];
+    //     snprintf(txt, sizeof(txt), "[urzednik] Koncze prace na dzis z mozliwoscia przyjecia max %d", sem_getvalue(urzad->semlock, limit_semlock_idx));
+    //     logger_log(logger_id, txt, LOG_INFO);
+    //   }
+    //   logger_log(logger_id, "[urzednik] Koncze na dzisiaj prace", LOG_INFO);
+    // }
+    sync_sleep(1);
   }
+
+  logger_log(logger_id, "[urzednik] Zakonczylem prace planowo. Oczekiwanie na zamkniecie gabinetu", LOG_INFO);
+  sem_lock(urzad->semlock, queue_semlock_idx);
+  // Free remaining people in queue
+  {
+    msg_ticket_t tck;
+    while(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_PRIORITY_OFFSET, IPC_NOWAIT) != -1){
+      tck.mtype = tck.requester;
+      tck.ticketid = -1;
+      msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+      {
+        char txt[256];
+        snprintf(txt, sizeof(txt), "[urzednik][%s] Petent nie może zostać przyjęty, bo urzad sie zamyka. (PIORITY PetentPID: %d, BiletID: %d, Sprawa: \"%s\", Wystawił: %d)", faculty_to_str(type), tck.requester, tck.ticketid, faculty_to_str(tck.facultytype), getpid());
+        logger_log(logger_id, txt, LOG_INFO);
+      }
+    }
+    while(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_OFFSET, IPC_NOWAIT) != -1){
+      tck.mtype = tck.requester;
+      tck.ticketid = -1;
+      msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+      {
+        char txt[256];
+        snprintf(txt, sizeof(txt), "[urzednik][%s] Petent nie może zostać przyjęty, bo urzad sie zamyka. (PetentPID: %d, BiletID: %d, Sprawa: \"%s\", Wystawił: %d)", faculty_to_str(type), tck.requester, tck.ticketid, faculty_to_str(tck.facultytype), getpid());
+        logger_log(logger_id, txt, LOG_INFO);
+      }
+    }
+  }
+  logger_log(logger_id, "[urzednik] Zamknalem gabinet i wracam do domu", LOG_INFO);
 
   return 0;
 }

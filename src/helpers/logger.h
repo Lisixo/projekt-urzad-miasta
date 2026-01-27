@@ -18,12 +18,18 @@ typedef struct log_msg {
   char mtext[LOG_MSG_SIZE];
 } log_msg_t;
 
+struct logger_control {
+  int stop;
+  pthread_mutex_t lock;
+};
+typedef struct logger_control logger_control_t;
+
 typedef struct {
   int msgid;
   FILE* latestfile;
   FILE* historyfile;
   pthread_t thread;
-  int running;
+  logger_control_t controller;
   LogLevel level;
   key_t key;
 } Logger;

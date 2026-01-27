@@ -13,16 +13,10 @@
 
 void wygeneruj_stan_urzedu(stan_urzedu_t *urzad);
 
-void wyslij_sygnal_1(pid_t pid) {
-  kill(pid, SIGUSR1);
-}
-
-void wyslij_sygnal_2() {
-  kill(0, SIGUSR2);
-}
-
 int main() {
   srand(time(NULL));
+  signal(SIGUSR1, SIG_IGN);
+  signal(SIGUSR2, SIG_IGN);
 
   // attach logger
   int logger_id = msgget(uniq_key(KEY_MAIN_LOGGER), SYNC_PERM);
@@ -42,17 +36,6 @@ int main() {
     urzad = shmat(stan_urzedu_shmid, NULL, 0);
   }
 
-  // attach petent_limit
-  petent_limit_t *petentl;
-  {
-    int petent_limit_shmid = shmget(uniq_key(KEY_SHM_PETENT_LIMIT), sizeof(petent_limit_t), SYNC_PERM);
-    if(petent_limit_shmid == -1) {
-      logger_log(logger_id, "[dyrektor/init] Nie mozna otworzyc petent_limit", LOG_ERROR);
-      exit(1);
-    }
-    petentl = shmat(petent_limit_shmid, NULL, 0);
-  }
-
   // Setup urzad rules
   logger_log(logger_id, "[dyrektor/init] Ustalanie regul urzedu", LOG_INFO);
   if(sem_lock(urzad->semlock, urzad->semlock_idx) == -1){
@@ -62,7 +45,9 @@ int main() {
   }
 
   wygeneruj_stan_urzedu(urzad);
-  urzad->is_operating = 1; // mark stan_urzedu as configured
+
+  // mark urzad as configured
+  sem_setvalue(urzad->semlock, urzad->sems.configured, PETENT_COUNT + 1);
 
   {
     struct tm to = *localtime(&urzad->time_open);
@@ -83,49 +68,55 @@ int main() {
 
   // Wait for opening time
   logger_log(logger_id, "[dyrektor] Oczekuje na otwarcie urzedu", LOG_INFO);
-  while(time(NULL) < urzad->time_open){
-    sleep(10);
+  {
+    time_t t = urzad->time_open - time(NULL);
+    if((int)t > 0){
+      sync_sleep((int)t);
+    }
   }
 
-  // Set open flag
+  // Open building
+  logger_log(logger_id, "[dyrektor] Otwieranie urzedu", LOG_INFO);
   sem_lock(urzad->semlock, urzad->semlock_idx);
   urzad->is_opened = 1;
   sem_unlock(urzad->semlock, urzad->semlock_idx);
-  
-  // Open lobby
-  {
-    union semun {
-      int val;
-      struct semid_ds *buf;
-      unsigned short *array;
-    } arg;
-    arg.val = petentl->lobby_max;
-    if(semctl(petentl->limit_sem, petentl->lobby, SETVAL, arg) == -1) {
-      logger_log(logger_id, "[dyrektor] Nie mozna otworzyc lobby", LOG_ERROR);
-      exit(1);
-    }
+  sem_setvalue(urzad->semlock, urzad->sems.opened, 100);
+  if(sem_setvalue(urzad->semlock, urzad->sems.building, urzad->building_max) == -1) {
+    logger_log(logger_id, "[dyrektor] Nie mozna otworzyc lobby", LOG_ERROR);
+    exit(1);
+  }
+  else {
+    logger_log(logger_id, "[dyrektor] Urzad zostal otwarty", LOG_INFO);
   }
 
   // WORKING TIME
-  logger_log(logger_id, "[dyrektor] Urzad zostal otwarty", LOG_INFO);
   while(time(NULL) < urzad->time_close){
-    sleep(1);
+    sync_sleep(1);
 
-    // Event 1: Zwolnienie pracownika szybciej do domu
-    if(rand() % 2000 == 0) {
-      sem_lock(urzad->semlock, urzad->semlock_idx);
-      pid_t p = urzad->urzednicy_pids[p % 7];
-      sem_unlock(urzad->semlock, urzad->semlock_idx);
-      wyslij_sygnal_1(p);
-    }
-    // Event 1: Zwolnienie pracownika szybciej do domu
-    if(rand() % 2000 == 0) {
-      wyslij_sygnal_2();
-      break;
-    }
+    // Event 1: Zwolnienie losowego pracownika szybciej do domu
+    // if(rand() % 2000 == 0) {
+    //   sem_lock(urzad->semlock, urzad->semlock_idx);
+    //   pid_t p = urzad->urzednicy_pids[p % WORKER_COUNT];
+    //   sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+    //   kill(p, SIGUSR1);
+    // }
+
+    // // Event 2: Ewakuacja
+    // if(rand() % 2000 == 0) {
+    //   sem_lock(urzad->semlock, urzad->semlock_idx);
+      
+    //   for(int i=0; i<PETENT_COUNT; i++) {
+    //     kill(urzad->petent_pids[i], SIGUSR2);
+    //   }
+
+    //   sem_unlock(urzad->semlock, urzad->semlock_idx);
+    //   break;
+    // }
   }
 
   // Set close flag
+  sem_setvalue(urzad->semlock, urzad->sems.opened, 0);
   sem_lock(urzad->semlock, urzad->semlock_idx);
   urzad->is_opened = 0;
   sem_unlock(urzad->semlock, urzad->semlock_idx);
@@ -138,10 +129,16 @@ int main() {
       unsigned short *array;
     } arg;
     arg.val = 0;
-    if(semctl(petentl->limit_sem, petentl->lobby, SETVAL, arg) == -1) {
+    if(sem_setvalue(urzad->semlock, urzad->sems.building, 0) == -1) {
       logger_log(logger_id, "[dyrektor] Nie mozna zamknac lobby", LOG_ERROR);
       exit(1);
     }
+  }
+
+  {
+    char txt[256];
+    snprintf(txt, sizeof(txt), "[dyrektor] Liczba osob oczekujacych przed budynkiem: %d", sem_wait_value(urzad->semlock, urzad->sems.building));
+    logger_log(logger_id, txt, LOG_DEBUG);
   }
 
   logger_log(logger_id, "[dyrektor] Zakonczono procedure dyrektor", LOG_INFO);

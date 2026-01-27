@@ -22,7 +22,7 @@ Zasady działania urzędu ustalone przez Dyrektora są następujące:
 - Każdy petent przed wizytą u urzędnika musi pobrać bilet z systemu kolejkowego
 - W urzędzie są 3 automaty biletowe, zawsze działa min. 1 stanowisko
 - Jeżeli w kolejce po bilet stoi więcej niż K petentów (K>=N/3) uruchamia się drugi automat biletowy. Drugi automat zamyka się jeżeli liczba petentów w kolejce jest mniejsza niż N/3. Jeżeli w kolejkach po bilet stoi więcej niż 2K petentów (K>=N/3) uruchamia się trzeci automat biletowy. Trzeci automat zamyka się jeżeli liczba petentów w kolejkach jest mniejsza niż 2/3*N
-- Osoby uprawnione VIP (np. honorowy dawca krwi) do gabinetu lekarskiego wchodzą bez kolejki
+- Osoby uprawnione VIP do gabinetu wchodzą bez kolejki
 - Jeżeli zostaną wyczerpane limity przyjęć do danego urzędnika, petenci ci nie są przyjmowani (nie mogą pobrać biletu po wyczerpaniu limitu);
 - Jeżeli zostaną wyczerpane limity przyjęć w danym dniu do wszystkich urzędników, petenci
 nie są wpuszczani do budynku;

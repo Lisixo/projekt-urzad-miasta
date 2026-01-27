@@ -7,10 +7,26 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/signal.h>
+#include <sys/errno.h>
 #include "helpers/consts.h"
 #include "helpers/sync.h"
 #include "helpers/logger.h"
 #include "helpers/utils.h"
+
+volatile sig_atomic_t sig2;
+
+// Sygnaly dla exception_check()
+typedef enum {
+  NOTHING,
+  EXIT_ERROR,
+  EXIT_NORMAL
+} ExceptionSignal;
+
+struct pthread_control {
+  int stop;
+  pthread_mutex_t lock;
+};
+typedef struct pthread_control pthread_control_t;
 
 struct petent {
   pid_t pid;
@@ -18,55 +34,55 @@ struct petent {
   int numer_biletu;
   int ma_dziecko;
   pthread_t dziecko;
+  pthread_control_t dziecko_controller;
   int arrive_time;
-  msg_ticket_t *tickets;
-  int tickets_size;
+  int vip;
 };
 typedef struct petent petent_t;
 
 void* dziecko_main(void* arg) {
+  pthread_control_t* c = (pthread_control_t*)arg;
+  int should_stop = 0;
+
   while(1) {
-    //TODO: Dziecko logic
-    sleep(1);
+    pthread_mutex_lock(&c->lock);
+    if(c->stop != 0){
+      should_stop = 1;
+    }
+    pthread_mutex_unlock(&c->lock);
+
+    if(should_stop == 1) {
+      break;
+    }
+
+    sync_sleep(1);
   }
   return 0;
 }
 
-void shutdown(petent_t *p) {
+void shutdown(petent_t *p, int signal) {
   if(p->ma_dziecko == 1){
-    pthread_cancel(p->dziecko);
+    pthread_mutex_lock(&p->dziecko_controller.lock);
+    p->dziecko_controller.stop = 1;
+    pthread_mutex_unlock(&p->dziecko_controller.lock);
+
     pthread_join(p->dziecko, NULL);
   }
-  if(p->tickets != NULL) {
-    free(p->tickets);
-  }
-  if(p != NULL) {
-    free(p);
-  }
+  exit(signal);
 }
-
-int dodaj_bilet(petent_t *p, msg_ticket_t tck) {
-  int new_size = p->tickets_size + 1;
-  msg_ticket_t *temp = (msg_ticket_t*)realloc(p->tickets, new_size * sizeof(msg_ticket_t));
-  if (temp == NULL) return -1;
-
-  p->tickets = temp;
-  p->tickets[p->tickets_size] = tck;
-  p->tickets_size = new_size;
-  return 0;
-}
-
-int czy_sygnal_2 = 0;
 
 void signal2handler(int sig) {
-  if(czy_sygnal_2 == 0){
-    czy_sygnal_2 = 1;
-  }
+  sig2 = 1;
+}
+
+int exception_check() {
+
 }
 
 int main() {
   // random seed based on getpid() because time(NULL) will be same for all customers
   srand(getpid());
+  signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, signal2handler);
 
   // attach logger
@@ -77,31 +93,27 @@ int main() {
   }
 
   // init primary data
-  petent_t* petent = malloc(sizeof(petent_t));
-  if(petent == NULL){
-    logger_log(logger_id, "[petent/init/malloc] Nie mozna przydzielic pamieci", LOG_ERROR);
-  }
+  petent_t petent;
 
-  petent->ma_dziecko = 0;
-
-  petent->tickets = malloc(sizeof(msg_ticket_t));
-  petent->tickets_size = 0;
-  if(petent == NULL){
-    logger_log(logger_id, "[petent/init/malloc] Nie mozna przydzielic pamieci", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
-  }
-
-  petent->pid = getpid();
-  petent->sprawa = (FacultyType)((rand() % 5) + 1);
-  petent->numer_biletu = -1;
+  petent.ma_dziecko = 0;
+  petent.pid = getpid();
+  petent.sprawa = (FacultyType)((rand() % 5) + 1);
+  petent.numer_biletu = -1;
   
+  if(rand() % 200 == 0) {
+    petent.vip = 1;
+  }
+
   // kid setup
   if(rand() % 200 == 0) {
-    petent->ma_dziecko = 1;
-    pthread_create(&petent->dziecko, NULL, dziecko_main, NULL);
+    petent.ma_dziecko = 1;
+
+    petent.dziecko_controller.stop = 0;
+    pthread_mutex_init(&petent.dziecko_controller.lock, NULL);
+
+    pthread_create(&petent.dziecko, NULL, dziecko_main, &petent.dziecko_controller);
   } else {
-    petent->ma_dziecko = 0;
+    petent.ma_dziecko = 0;
   }
   
   // attach stan_urzedu
@@ -110,44 +122,24 @@ int main() {
     int stan_urzedu_shmid = shmget(uniq_key(KEY_SHM_URZAD), sizeof(stan_urzedu_t), SYNC_PERM);
     if(stan_urzedu_shmid == -1) {
       logger_log(logger_id, "[petent/init] Nie mozna otworzyc stan_urzedu", LOG_ERROR);
-      shutdown(petent);
-      exit(1);
+      shutdown(&petent, 1);
     }
     urzad = shmat(stan_urzedu_shmid, NULL, 0);
   }
 
-  // attach petent_limit
-  petent_limit_t *petentl;
-  {
-    int petent_limit_shmid = shmget(uniq_key(KEY_SHM_PETENT_LIMIT), sizeof(petent_limit_t), SYNC_PERM);
-    if(petent_limit_shmid == -1) {
-      logger_log(logger_id, "[petent/init] Nie mozna otworzyc petent_limit", LOG_ERROR);
-      shutdown(petent);
-      exit(1);
-    }
-    petentl = shmat(petent_limit_shmid, NULL, 0);
-  }
-  
-  // attach rejestracja msg
-  int rejestracjamsgid = msgget(uniq_key(KEY_MSG_TICKETS), SYNC_PERM);
-  if(rejestracjamsgid == -1) {
-    logger_log(logger_id, "[petent/init] Nie mozna otworzyc rejestracja_msg MSG", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
-  }
-
   // attach urzednik msg
-  int urzednikmsgid = msgget(uniq_key(KEY_MSG_WORKER), SYNC_PERM);
-  if(urzednikmsgid == -1) {
-    logger_log(logger_id, "[petent/init] Nie mozna otworzyc urzednik_msg MSG", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
+  int global_msg_id = msgget(uniq_key(KEY_MSG_GLOBAL), SYNC_PERM);
+  if(global_msg_id == -1) {
+    logger_log(logger_id, "[petent/init] Nie mozna otworzyc global MSG", LOG_ERROR);
+    shutdown(&petent, 1);
   }
 
   // wait for urzad setup
-  while(urzad->is_operating != 1){
-    sleep(5);
-  }
+  if(sem_lock(urzad->semlock, urzad->sems.configured) == -1) {
+    logger_log(logger_id, "[petent] Nie moge znalesc informacji o godzine otwarcia urzedu", LOG_ERROR);
+    shutdown(&petent, 1);
+  };
+  sem_unlock(urzad->semlock, urzad->sems.configured);
   
   // create waiting time
   time_t t = (urzad->time_close - urzad->time_open);
@@ -156,197 +148,182 @@ int main() {
   
   {
     char txt[256];
-    snprintf(txt, sizeof(txt), "[petent] Dzisiaj musze zalatwic sprawe w %s. Przyjde do urzedu okolo %02d:%02d", faculty_to_str(petent->sprawa), tm.tm_hour, tm.tm_min);
+    snprintf(txt, sizeof(txt), "[petent] Dzisiaj musze zalatwic sprawe w %s. Przyjde do urzedu okolo %02d:%02d", faculty_to_str(petent.sprawa), tm.tm_hour, tm.tm_min);
     logger_log(logger_id, txt, LOG_DEBUG);
   }
 
-  // wait for opening and arrival
-  while(urzad->is_opened != 1 && time(NULL) > arrive_time){
-    sleep(5);
+  // wait for opening
+  if(sem_lock(urzad->semlock, urzad->sems.opened) == -1) {
+    logger_log(logger_id, "[petent] Chyba urzad dzisiaj wogole nie pracuje. Wracam do domu", LOG_ERROR);
+    shutdown(&petent, 1);
+  };
+  sem_unlock(urzad->semlock, urzad->sems.opened);
+
+  if(sem_lock(urzad->semlock, urzad->semlock_idx) == -1) {
+    sem_lock(urzad->semlock, urzad->semlock_idx);
+    int urzad_is_opened = urzad->is_opened;
+    sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+    if(errno == EINTR && urzad_is_opened == 0) {
+      logger_log(logger_id, "Urzad zostal zamkniety zanim wszedlem", LOG_INFO);
+      shutdown(&petent, 0);
+    }
+    logger_log(logger_id, "Urzad zostal zamkniety zanim wszedlem", LOG_INFO);
+    shutdown(&petent, 1);
+  }
+  int urzad_is_opened = urzad->is_opened;
+  sem_unlock(urzad->semlock, urzad->semlock_idx);
+
+  //wait for arrival
+  {
+    time_t t = urzad->time_open - time(NULL);
+    if((int)t > 0){
+      sync_sleep((int)t);
+    }
   }
 
   // try go into building
-  int people_count = petent->ma_dziecko ? 2 : 1;
+  int people_count = petent.ma_dziecko ? 2 : 1;
   {
-    if(sem_lock_multi(petentl->limit_sem, petentl->lobby, people_count) == -1) {
+    if(sem_lock_multi(urzad->semlock, urzad->sems.building, people_count) == -1) {
       logger_log(logger_id, "[petent] Nie moge zajac miejsca w budynku. Wracam do domu", LOG_ERROR);
-      shutdown(petent);
-      return 0;
+      shutdown(&petent, 0);
     }
   }
 
   // entered the building
   logger_log(logger_id, "[petent] Wszedlem do budynku i ide sie ustawic w kolejce po bilet", LOG_DEBUG);
 
-  // ustawienie sie do kolejki na bilet i oczekiwanie na jego pobranie
-  sem_lock(urzad->semlock, urzad->semlock_idx);
-  urzad->ticket_queue++;
-  sem_unlock(urzad->semlock, urzad->semlock_idx);
-
   msg_ticket_t tck;
   tck.mtype = 1;
-  tck.facultytype = petent->sprawa;
-  tck.requester = petent->pid;
+  tck.facultytype = petent.sprawa;
+  tck.requester = petent.pid;
   tck.ticketid = 0;
   tck.payment = PAYMENT_NOT_NEEDED;
-  tck.redirected_from = 0;
+  tck.redirected_from = petent.vip;
+
+  // PETENT <---> REJESTRACJA
+  {
+    // ustawienie sie do kolejki na bilet i oczekiwanie na jego pobranie
+    sem_lock(urzad->semlock, urzad->sems.tickets);
+
+    if(msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1){
+      logger_log(logger_id, "[petent/ticket] Nie moge skorzystac z biletomatu. Wracam do domu sfustrowany", LOG_ERROR);
+      sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count);
+      sem_unlock(urzad->semlock, urzad->sems.tickets);
+      shutdown(&petent, 1);
+    }
   
-  if(msgsnd(rejestracjamsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1){
-    logger_log(logger_id, "[petent/ticket] Nie mozna wyslac zadania o bilet", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
-  }
-
-  logger_log(logger_id, "[petent/ticket] Czekam w kolejce bilet", LOG_INFO);
-
-  if(msgrcv(rejestracjamsgid, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent->pid, 0) == -1) {
-    sem_lock(urzad->semlock, urzad->semlock_idx);
-    int is_opened = urzad->is_opened;
-    sem_unlock(urzad->semlock, urzad->semlock_idx);
-
-    // Logika sygnalu 2
-    if(czy_sygnal_2) {
-      logger_log(logger_id, "[petent/signal] Dostalem sygnal zeby uciekac z budynku", LOG_INFO);
-      sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count);
-      shutdown(petent);
-      exit(0);
-    }
-    // Logika zamkniecia urzedu w trakcie zalatwiania sprawy
-    else if(is_opened == 0) {
+    logger_log(logger_id, "[petent/ticket] Czekam w kolejce bilet", LOG_INFO);
+  
+    if(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent.pid, 0) == -1) {
       sem_lock(urzad->semlock, urzad->semlock_idx);
-      urzad->ticket_queue--; // zwalnianie miejsca w kolejce
+      int urzad_is_opened = urzad->is_opened;
       sem_unlock(urzad->semlock, urzad->semlock_idx);
-
-      sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count); // zwalnianie miejsca w budynku
-
-      logger_log(logger_id, "[petent] Urzad sie zamknal zanim zalatwilem swoja sprawe", LOG_INFO);
-      sleep(120);
-      logger_log(logger_id, "[petent] Jestem sfustrowany", LOG_INFO);
-    }
-    // Logika wylaczania
-    logger_log(logger_id, "[petent/ticket] Nie moge odebrac biletu", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
-  }
-
-  // Petent wraca do domu, gdy nie dostanie biletu
-  if(tck.ticketid == -1) {
-    logger_log(logger_id, "[petent/ticket] Limit biletow zostal wyczerpany. Wracam do domu", LOG_ERROR);
-    // Zwolnienie miejsca w lobby
-      if(sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count) == -1) {
-        {
-          char txt[128];
-          snprintf(txt, sizeof(txt), "[petent][PID:%d] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", petent->pid);
-          logger_log(logger_id, txt, LOG_WARNING);
-        }
+  
+      // Logika sygnalu 2
+      if(sig2) {
+        logger_log(logger_id, "[petent/signal] Dostalem sygnal zeby uciekac z budynku", LOG_INFO);
+        sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count);
+        sem_unlock(urzad->semlock, urzad->sems.tickets);
+        shutdown(&petent, 0);
       }
-    shutdown(petent);
-    exit(0);
+      // Logika zamkniecia urzedu w trakcie zalatwiania sprawy
+      else if(urzad_is_opened == 0) {
+        logger_log(logger_id, "[petent] Urzad sie zamknal zanim zalatwilem swoja sprawe", LOG_INFO);
+        sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count);
+        sem_unlock(urzad->semlock, urzad->sems.tickets);
+        shutdown(&petent, 1);
+      }
+  
+      // Logika wylaczania
+      logger_log(logger_id, "[petent/ticket] Nie moge odebrac biletu", LOG_ERROR);
+      sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count);
+      sem_unlock(urzad->semlock, urzad->sems.tickets);
+      shutdown(&petent, 1);
+    }
+  
+    // Petent wraca do domu, gdy nie dostanie biletu
+    if(tck.ticketid == -1) {
+      logger_log(logger_id, "[petent/ticket] Limit biletow zostal wyczerpany. Wracam do domu", LOG_ERROR);
+      // Zwolnienie miejsca w lobby
+        if(sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count) == -1) {
+          logger_log(logger_id, "[petent] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", LOG_WARNING);
+        }
+      sem_unlock(urzad->semlock, urzad->sems.tickets);
+      shutdown(&petent, 0);
+    }
+  
+    logger_log(logger_id, "[petent/ticket] Otrzymalem bilet", LOG_DEBUG);
+    // Oddalenie sie z kolejki i oczekiwanie na urzednikow
+    sem_unlock(urzad->semlock, urzad->sems.tickets);
   }
 
-  // Przypisanie biletu do petenta i oddalenie sie z kolejki
-  if(dodaj_bilet(petent, tck) == -1) {
-    logger_log(logger_id, "[petent/ticket] Nie moge zabrac biletu ze soba. Wracam do domu", LOG_ERROR);
-    shutdown(petent);
-    exit(1);
-  }
+  tck.mtype = tck.queueid;
 
-  logger_log(logger_id, "[petent/ticket] Otrzymalem bilet", LOG_DEBUG);
-
-  sem_lock(urzad->semlock, urzad->semlock_idx);
-  urzad->ticket_queue--;
-  sem_unlock(urzad->semlock, urzad->semlock_idx);
-
-  tck.mtype = tck.facultytype;
-
-  // Chodzenie po urzednikach
+  // PETENT <---> URZEDNIK --> ...
   while(tck.facultytype != 0) {
 
     // Udanie sie do urzednika
-    if(msgsnd(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1) {
+    if(msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1) {
       logger_log(logger_id, "[petent/urzednik] Nie moge sie udac do urzednika z biletu", LOG_ERROR);
-      shutdown(petent);
-      exit(1);
+      shutdown(&petent, 1);
     }
 
     // Oczekiwanie na wejscie i oczekiwanie na zalatwienie sprawy lub otrzymanie nowego biletu
-    if(msgrcv(urzednikmsgid, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent->pid, 0) == -1) {
+    if(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), (long)petent.pid, 0) == -1) {
       sem_lock(urzad->semlock, urzad->semlock_idx);
-      int is_opened = urzad->is_opened;
+      int urzad_is_opened = urzad->is_opened;
       sem_unlock(urzad->semlock, urzad->semlock_idx);
 
       // Logika sygnalu 2
-      if(czy_sygnal_2) {
+      if(sig2) {
         logger_log(logger_id, "[petent/signal] Dostalem sygnal zeby uciekac z budynku", LOG_INFO);
-        sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count);
-        shutdown(petent);
-        exit(0);
+        sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count);
+        shutdown(&petent, 0);
       }
       // Logika zamkniecia urzedu w trakcie zalatwiania sprawy
-      else if(is_opened == 0) {
-        sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count); // zwalnianie miejsca w budynku
+      else if(urzad_is_opened == 0) {
+        sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count); // zwalnianie miejsca w budynku
 
         logger_log(logger_id, "[petent] Urzad sie zamknal zanim zalatwilem swoja sprawe", LOG_INFO);
-        sleep(120);
+        sync_sleep(120);
         logger_log(logger_id, "[petent] Jestem sfustrowany", LOG_INFO);
       }
       // Logika wylaczania
       logger_log(logger_id, "[petent/urzednik] Nie moge otrzymac nowego biletu od urzednika", LOG_ERROR);
-      shutdown(petent);
-      exit(1);
-    }
-
-    {
-      char txt[192];
-      snprintf(txt, sizeof(txt), "[petent/p] DEBUG [%ld][%d][%d]", tck.mtype, tck.facultytype, tck.redirected_from);
-      logger_log(logger_id, txt, LOG_INFO);
+      shutdown(&petent, 1);
     }
 
     {
       char txt[128];
-      snprintf(txt, sizeof(txt), "[petent/przekierowanie] Zostalem przekierowany do %s", faculty_to_str(tck.mtype));
+      snprintf(txt, sizeof(txt), "[petent/przekierowanie] Zostalem przekierowany z %s do %s %d", faculty_to_str(tck.facultytype), faculty_to_str(tck.queueid % 10), tck.queueid);
       logger_log(logger_id, txt, LOG_INFO);
     }
 
     if(tck.ticketid == -1) {
       logger_log(logger_id, "[petent/przekierowanie] Limit biletow zostal wyczerpany. Wracam do domu", LOG_ERROR);
       // Zwolnienie miejsca w lobby
-      if(sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count) == -1) {
-        {
-          char txt[128];
-          snprintf(txt, sizeof(txt), "[petent][PID:%d] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", petent->pid);
-          logger_log(logger_id, txt, LOG_WARNING);
-        }
+      if(sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count) == -1) {
+        logger_log(logger_id, "[petent] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", LOG_WARNING);
       }
-      shutdown(petent);
-      exit(0);
+      shutdown(&petent, 0);
     }
 
-    // zapisz bilety w historii
-    if(dodaj_bilet(petent, tck) == -1) {
-      logger_log(logger_id, "[petent/ticket] Nie moge zabrac biletu ze soba. Wracam do domu", LOG_ERROR);
-      shutdown(petent);
-      exit(1);
-    }
-
-    tck.mtype = tck.facultytype;
+    tck.mtype = tck.queueid;
   }
 
   logger_log(logger_id, "[petent] Udalo mi sie wszytsko zalatwic", LOG_INFO);
 
   // leave the building
   {
-    if(sem_unlock_multi(petentl->limit_sem, petentl->lobby, people_count) == -1) {
-      {
-        char txt[128];
-        snprintf(txt, sizeof(txt), "[petent][PID:%d] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", petent->pid);
-        logger_log(logger_id, txt, LOG_WARNING);
-      }
+    if(sem_unlock_multi(urzad->semlock, urzad->sems.building, people_count) == -1) {
+      logger_log(logger_id, "[petent] Nie moge wyjsc z urzedu. Niech ktos mnie wypusci", LOG_WARNING);
     }
   }
 
   // closing logic
   logger_log(logger_id, "[petent] Wyszedlem z urzedu", LOG_DEBUG);
-  shutdown(petent);
+  shutdown(&petent, 0);
   return 0;
 }

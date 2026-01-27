@@ -2,8 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 project(SymulacjaUrzadMiasta LANGUAGES C)
 
 # C version setup
-set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
 
 # debug build mode
 set(CMAKE_BUILD_TYPE Debug)

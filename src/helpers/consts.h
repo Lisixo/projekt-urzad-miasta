@@ -5,12 +5,18 @@
 #define KEY_SHM_URZAD 'U'
 #define KEY_SHM_PETENT_LIMIT 'P'
 #define KEY_SHM_SEMLOCK 'Q'
+#define KEY_SHM_RAPORT 'E'
 #define KEY_SEM_LIMITS 'R'
-#define KEY_MSG_TICKETS 'T'
-#define KEY_MSG_WORKER 'W'
+#define KEY_MSG_GLOBAL 'G'
 
-#define DYREKTOR_MAX_LOBBY 30
+#define D_MSG_TICKET_OFFSET 0
+#define D_MSG_WORKER_OFFSET 10
+#define D_MSG_WORKER_PRIORITY_OFFSET 20
+
+#define DYREKTOR_MAX_LOBBY 300
 #define PETENT_COUNT 1000
+#define WORKER_COUNT 7
+#define TICKET_MACHINE_COUNT 3
 
 // shared structures
 
@@ -29,66 +35,56 @@ typedef enum {
   PAYMENT_SUCCESS
 } PaymentStatus;
 
-struct petent_limit {
-  int sc, km, ml, pd, sa1, sa2; // index semafora dla wydzialu
-  int lobby; // index semafora dla lobby
-
-  int sc_max, km_max, ml_max, pd_max, sa_max; // ustawione limity przy starcie
-  int lobby_max; // ustawiony limit dla lobby
-
-  int ticket_count;
-
-  int limit_sem;
-
-  int semlock;
-  int semlock_idx;
+struct sems {
+  int configured; // czy dyrektor ustalil dzialanie urzedu
+  int opened; // czy urzad jest otwarty
+  int building; // bramka ograniczajaca ile osob moze wejsc
+  // int ticket_queue; // kolejka do maszyn biletowych
+  int tickets; // kolejka do otwartych stanowisk biletowych
+  
+  int sa_queue; // kolejka do sa
+  int sc_queue; // kolejka do sc
+  int ml_queue; // kolejka do ml
+  int pd_queue; // kolejka do pd
+  int km_queue; // kolejka do kd
+  int cashier_queue; // kolejka do kasy
+  
+  int sa1_limit; // licznik limitu dziennych przyjec
+  int sa2_limit; // licznik limitu dziennych przyjec
+  int sc_limit; // licznik limitu dziennych przyjec
+  int ml_limit; // licznik limitu dziennych przyjec
+  int pd_limit; // licznik limitu dziennych przyjec
+  int km_limit; // licznik limitu dziennych przyjec
+  int cashier_limit; // licznik limitu dziennych przyjec
 };
-typedef struct petent_limit petent_limit_t;
+typedef struct sems sems_t;
 
 struct stan_urzedu {
   int semlock;
   int semlock_idx;
 
+  sems_t sems;
+
   time_t time_open; // Tp
   time_t time_close; // Tk
 
   int is_opened; // Czy urzad jest otwarty
-  int is_operating; // Czy urzad jest funkcjonujacy (czy dyrektor oglosil godziny otwarcia)
+  int building_max;
+  int taken_ticket_count;
 
-  pid_t urzednicy_pids[7];
-  int ticket_queue;
+  pid_t urzednicy_pids[WORKER_COUNT];
+  pid_t rejestracja_pids[TICKET_MACHINE_COUNT];
+  pid_t petent_pids[PETENT_COUNT];
 };
 typedef struct stan_urzedu stan_urzedu_t;
 
 struct msg_ticket{
-  long mtype; // identyfikator adresata
+  long mtype; // identyfikator kolejki
   pid_t requester; // nadawca
   int ticketid; // numer biletu
-  FacultyType facultytype; // adresat
+  FacultyType facultytype; // typ biletu
+  int queueid; // kierunek
   PaymentStatus payment; // inforamcje o platnosci
   FacultyType redirected_from; // przekierowano przez
 };
 typedef struct msg_ticket msg_ticket_t;
-
-struct raport_dnia {
-  int semlock;
-  int semlock_idx;
-
-  int petent_count;
-
-  int sa_count;
-  int sc_count;
-  int km_count;
-  int ml_count;
-  int pd_count;
-  int cashier_count;
-
-  int ticket_count;
-
-  msg_ticket_t *ticket_success;
-  int ticket_success_count;
-
-  msg_ticket_t *ticket_failed;
-  int ticket_failed_count;
-};
-typedef struct raport_dnia raport_dnia_t;

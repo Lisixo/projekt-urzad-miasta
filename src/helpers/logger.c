@@ -14,7 +14,7 @@ void* logger_loop(void* arg) {
   Logger* l = (Logger*)arg;
   log_msg_t buf;
 
-  while(l->running) {
+  while(1) {
     if(msgrcv(l->msgid, &buf, sizeof(buf.mtext), 0, 0) == -1) {
       continue;
     }
@@ -27,6 +27,13 @@ void* logger_loop(void* arg) {
     fflush(l->latestfile);
     fprintf(l->historyfile, "%s\n", buf.mtext);
     fflush(l->historyfile);
+
+    pthread_mutex_lock(&l->controller.lock);
+    if(l->controller.stop){
+      pthread_mutex_unlock(&l->controller.lock);
+      break;
+    }
+    pthread_mutex_unlock(&l->controller.lock);
   }
 
   return NULL;
@@ -99,7 +106,7 @@ Logger* logger_create(key_t id, const char* path, LogLevel level) {
 
   logger->key = id;
   logger->level = level;
-  logger->running = 1;
+  logger->controller.stop = 0;
 
   if(pthread_create(&logger->thread, NULL, logger_loop, logger) != 0) {
     perror("logger_create: failed to create THREAD ::");
@@ -168,7 +175,10 @@ void logger_destroy(Logger* logger) {
   if (!logger)
     return;
     
-  logger->running = 0;
+  pthread_mutex_lock(&logger->controller.lock);
+  logger->controller.stop = 1;
+  pthread_mutex_unlock(&logger->controller.lock);
+  
   logger_log(logger->msgid, "logger thread stoped", LOG_DEBUG);
     
   pthread_join(logger->thread, NULL);
