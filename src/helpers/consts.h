@@ -13,8 +13,11 @@
 #define D_MSG_WORKER_OFFSET 10
 #define D_MSG_WORKER_PRIORITY_OFFSET 20
 
-#define DYREKTOR_MAX_LOBBY 300
-#define PETENT_COUNT 1000
+#define DYREKTOR_MAX_LOBBY 30
+#define PETENT_COUNT 300
+#define URZAD_TIME_OPEN -1
+#define URZAD_TIME_CLOSE -1
+
 #define WORKER_COUNT 7
 #define TICKET_MACHINE_COUNT 3
 
@@ -69,6 +72,7 @@ struct stan_urzedu {
   time_t time_close; // Tk
 
   int is_opened; // Czy urzad jest otwarty
+  int is_locked;
   int building_max;
   int taken_ticket_count;
 

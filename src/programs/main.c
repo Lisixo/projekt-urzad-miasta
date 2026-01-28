@@ -64,6 +64,7 @@ res_t* alloc_res() {
     urzad->time_close = 0;
     urzad->time_open = 0;
     urzad->is_opened = 0;
+    urzad->is_locked = 0;
 
     urzad->taken_ticket_count = 0;
 
@@ -75,43 +76,43 @@ res_t* alloc_res() {
     s.building = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.building, 0);
     s.tickets = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.tickets, 0);
+    sem_setvalue(urzad->semlock, s.tickets, TICKET_MACHINE_COUNT);
 
     s.km_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.km_limit, PETENT_COUNT * 10 / 100);
+    sem_setvalue(urzad->semlock, s.km_limit, 1);
     s.km_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.km_queue, 0);
+    sem_setvalue(urzad->semlock, s.km_queue, 1);
 
     s.ml_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.ml_limit, PETENT_COUNT * 10 / 100);
+    sem_setvalue(urzad->semlock, s.ml_limit, 1);
     s.ml_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.ml_queue, 0);
+    sem_setvalue(urzad->semlock, s.ml_queue, 1);
 
     s.pd_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.pd_limit, PETENT_COUNT * 10 / 100);
+    sem_setvalue(urzad->semlock, s.pd_limit, 1);
     s.pd_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.pd_queue, 0);
+    sem_setvalue(urzad->semlock, s.pd_queue, 1);
 
     s.sc_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sc_limit, PETENT_COUNT * 10 / 100);
+    sem_setvalue(urzad->semlock, s.sc_limit, 1);
     s.sc_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sc_queue, 0);
+    sem_setvalue(urzad->semlock, s.sc_queue, 1);
 
     int sa_max = PETENT_COUNT * 60 / 100;
     sa_max += PETENT_COUNT - sa_max - (4 * (int)(PETENT_COUNT * 10 / 100)); // align count
     int sa_half = sa_max / 2;
 
     s.sa1_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sa1_limit, sa_half);
+    sem_setvalue(urzad->semlock, s.sa1_limit, 1);
     s.sa2_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sa2_limit, PETENT_COUNT - sa_half);
+    sem_setvalue(urzad->semlock, s.sa2_limit, 1);
     s.sa_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sa_queue, 0);
+    sem_setvalue(urzad->semlock, s.sa_queue, 2);
 
     s.cashier_limit = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.cashier_limit, PETENT_COUNT);
     s.cashier_queue = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.cashier_queue, 0);
+    sem_setvalue(urzad->semlock, s.cashier_queue, 1);
 
     urzad->sems = s;
     

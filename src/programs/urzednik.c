@@ -89,31 +89,26 @@ int main(int argc, char* argv[]) {
   sem_unlock(urzad->semlock, urzad->sems.opened);
   int urzad_is_opened = 1;
 
-  // open for clients
-  sem_unlock(urzad->semlock, queue_semlock_idx);
-
   {
     char txt[192];
     snprintf(txt, sizeof(txt), "[urzednik][%s] Jestem gotowy do pracy", faculty_to_str(type));
     logger_log(logger_id, txt, LOG_INFO);
   }
 
-  int should_work = 1;
-
   // main loop
-  while(should_work) {
+  while(!sig1) {
     // odswiezanie stanu otwarcia urzedu
     sem_lock(urzad->semlock, urzad->semlock_idx);
     urzad_is_opened = urzad->is_opened;
     sem_unlock(urzad->semlock, urzad->semlock_idx);
 
-    switch(urzad_is_opened) {
-      case -1:
-        logger_log(logger_id, "[urzednik/loop] Nie moge sprawdzic stanu urzedu", LOG_ERROR);
-        should_work = 0;
-      case 0:
-        should_work = 0;
-        break;
+
+    if(!urzad_is_opened) {
+      break;
+    }
+
+    if(sig1) {
+      break;
     }
 
     // wejscie petenta
@@ -142,7 +137,10 @@ int main(int argc, char* argv[]) {
       logger_log(logger_id, txt, LOG_INFO);
     }
 
-    sync_sleep((rand() % 5) + 5); // symulacja zalatwiania sprawy dla petenta przez 5-10 sekund
+    sync_sleep((rand() % 15) + 5); // symulacja zalatwiania sprawy dla petenta przez 5-20 sekund
+
+    int original_ticket_id = tck.ticketid;
+    int original_faculty = tck.facultytype;
 
     if(type == FACULTY_SA && rand() % 100 < 40) {
       tck.redirected_from = tck.facultytype;
@@ -206,35 +204,56 @@ int main(int argc, char* argv[]) {
       sem_unlock(urzad->semlock, urzad->semlock_idx);
     }
 
+    // Send response to petent
     tck.mtype = tck.requester;
     if(msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0) == -1) {
       logger_log(logger_id, "[urzednik] Nie mozna wyslac biletu do petenta", LOG_WARNING);
     };
 
-    // zmiejszanie puli dziennych petentow lub koniec pracy (tylko gdy ma sie idx semlocka)
-    // struct sembuf op = {limit_semlock_idx, -1, IPC_NOWAIT};
-    // if(
-    //   (semop(urzad->semlock, &op, 1) == -1 && errno == EAGAIN)
-    //   || czy_sygnal_1
-    // ){
-    //   {
-    //     char txt[128];
-    //     snprintf(txt, sizeof(txt), "[urzednik] Koncze prace na dzis z mozliwoscia przyjecia max %d", sem_getvalue(urzad->semlock, limit_semlock_idx));
-    //     logger_log(logger_id, txt, LOG_INFO);
-    //   }
-    //   logger_log(logger_id, "[urzednik] Koncze na dzisiaj prace", LOG_INFO);
-    // }
+    // Send dyrektor a message if petent can't receive a ticket besacuse limit is exceeded
+    if(tck.ticketid == -1){
+      tck.mtype = 2;
+      tck.ticketid = original_ticket_id;
+      tck.facultytype = original_faculty;
+      tck.queueid = type;
+      msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+    }
+
+    // obsluga blokady globalnej wejscia
+    // obsluga blokady globalnej wejscia
+    sem_lock(urzad->semlock, urzad->semlock_idx);
+    int is_locked = urzad->is_locked;
+    if(
+      (sem_getvalue(urzad->semlock, urzad->sems.km_limit) + 
+      sem_getvalue(urzad->semlock, urzad->sems.ml_limit) + 
+      sem_getvalue(urzad->semlock, urzad->sems.pd_limit) + 
+      sem_getvalue(urzad->semlock, urzad->sems.sc_limit) + 
+      sem_getvalue(urzad->semlock, urzad->sems.sa1_limit) + 
+      sem_getvalue(urzad->semlock, urzad->sems.sa2_limit) == 0)
+      && is_locked == 0
+    ){
+      logger_log(logger_id, "[urzednik] Limity zostaly osiagniete. Blokujemy wejscie", LOG_INFO);
+      urzad->is_locked = 1;
+      sem_setvalue(urzad->semlock, urzad->sems.building, 0);
+    }
+    sem_unlock(urzad->semlock, urzad->semlock_idx);
+
     sync_sleep(1);
   }
 
   logger_log(logger_id, "[urzednik] Zakonczylem prace planowo. Oczekiwanie na zamkniecie gabinetu", LOG_INFO);
-  sem_lock(urzad->semlock, queue_semlock_idx);
   // Free remaining people in queue
   {
     msg_ticket_t tck;
     while(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_PRIORITY_OFFSET, IPC_NOWAIT) != -1){
+      // Send dyrektor a message if petent can't receive a ticket besacuse limit is exceeded
+      tck.mtype = 2;
+      tck.queueid = type;
+      msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+
       tck.mtype = tck.requester;
       tck.ticketid = -1;
+      tck.queueid = -1;
       msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
       {
         char txt[256];
@@ -242,9 +261,16 @@ int main(int argc, char* argv[]) {
         logger_log(logger_id, txt, LOG_INFO);
       }
     }
+    
     while(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_OFFSET, IPC_NOWAIT) != -1){
+      // Send dyrektor a message if petent can't receive a ticket besacuse limit is exceeded
+      tck.mtype = 2;
+      tck.queueid = type;
+      msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+
       tck.mtype = tck.requester;
       tck.ticketid = -1;
+      tck.queueid = -1;
       msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
       {
         char txt[256];

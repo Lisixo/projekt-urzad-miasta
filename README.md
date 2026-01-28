@@ -16,21 +16,22 @@ Urzędnicy (SC, KM, ML, PD) dodatkowo mogą skierować petenta do kasy (ok. 10%)
 
 Zasady działania urzędu ustalone przez Dyrektora są następujące:
 
-- urząd jest czynny w godzinach od Tp do Tk
-- W budynku w danej chwili może się znajdować co najwyżej N petentów (pozostali, jeżeli są czekają przed wejściem)
-- Dzieci w wieku poniżej 18 lat do urzędu przychodzą pod opieką osoby dorosłej
-- Każdy petent przed wizytą u urzędnika musi pobrać bilet z systemu kolejkowego
-- W urzędzie są 3 automaty biletowe, zawsze działa min. 1 stanowisko
-- Jeżeli w kolejce po bilet stoi więcej niż K petentów (K>=N/3) uruchamia się drugi automat biletowy. Drugi automat zamyka się jeżeli liczba petentów w kolejce jest mniejsza niż N/3. Jeżeli w kolejkach po bilet stoi więcej niż 2K petentów (K>=N/3) uruchamia się trzeci automat biletowy. Trzeci automat zamyka się jeżeli liczba petentów w kolejkach jest mniejsza niż 2/3*N
-- Osoby uprawnione VIP do gabinetu wchodzą bez kolejki
-- Jeżeli zostaną wyczerpane limity przyjęć do danego urzędnika, petenci ci nie są przyjmowani (nie mogą pobrać biletu po wyczerpaniu limitu);
-- Jeżeli zostaną wyczerpane limity przyjęć w danym dniu do wszystkich urzędników, petenci
-nie są wpuszczani do budynku;
-- Jeśli w chwili zamknięcia urzędu w kolejce do urzędnika czekali petenci to te osoby nie zostaną przyjęte w tym dniu przez urzędnika. Dane tych petentów (id - sprawa do …. – nr biletu) powinny zostać zapisane w raporcie dziennym (procesy symulujące nieprzyjęte osoby działają jeszcze 2 minuty po zakończeniu symulacji wypisując komunikat: „PID - jestem sfrustrowany”).
+- [x] urząd jest czynny w godzinach od Tp do Tk
+- [x] W budynku w danej chwili może się znajdować co najwyżej N petentów (pozostali, jeżeli są czekają przed wejściem)
+- [x] Dzieci w wieku poniżej 18 lat do urzędu przychodzą pod opieką osoby dorosłej
+- [x] Każdy petent przed wizytą u urzędnika musi pobrać bilet z systemu kolejkowego
+- [x] W urzędzie są 3 automaty biletowe, zawsze działa min. 1 stanowisko
+- [x] Jeżeli w kolejce po bilet stoi więcej niż K petentów (K>=N/3) uruchamia się drugi automat biletowy. Drugi automat zamyka się jeżeli liczba petentów w kolejce jest mniejsza niż N/3. Jeżeli w kolejkach po bilet stoi więcej niż 2K petentów (K>=N/3) uruchamia się trzeci automat biletowy. Trzeci automat zamyka się jeżeli liczba petentów w kolejkach jest mniejsza niż 2/3*N
+- [x] Osoby uprawnione VIP do gabinetu wchodzą bez kolejki
+- [x] Jeżeli zostaną wyczerpane limity przyjęć do danego urzędnika, petenci ci nie są przyjmowani (nie mogą pobrać biletu po wyczerpaniu limitu);
+- [x] Jeżeli zostaną wyczerpane limity przyjęć w danym dniu do wszystkich urzędników, petenci nie są wpuszczani do budynku;
+- [x] Jeśli w chwili zamknięcia urzędu w kolejce do urzędnika czekali petenci to te osoby nie zostaną przyjęte w tym dniu przez urzędnika. Dane tych petentów (id - sprawa do …. – nr biletu) powinny zostać zapisane w raporcie dziennym (procesy symulujące nieprzyjęte osoby działają jeszcze 2 minuty po zakończeniu symulacji wypisując komunikat: „PID - jestem sfrustrowany”).
 
-Na polecenie Dyrektora (sygnał 1) dany urzędnik obsługuje bieżącego petenta i kończy pracę przed zamknięciem urzędu. Dane petentów (id - skierowanie do … - wystawił), którzy nie zostali przyjęci powinny zostać zapisane w raporcie dziennym.
+- [x] Na polecenie Dyrektora (sygnał 1) dany urzędnik obsługuje bieżącego petenta i kończy pracę przed zamknięciem urzędu. Dane petentów (id - skierowanie do … - wystawił), którzy nie zostali przyjęci powinny zostać zapisane w raporcie dziennym.
 
-Na polecenie Dyrektora (sygnał 2) wszyscy petenci natychmiast opuszczają budynek. Napisz procedury Dyrektor, Rejestracja(biletomat), Urzędnik i Petent symulujące działanie urzędu miasta.
+- [x] Na polecenie Dyrektora (sygnał 2) wszyscy petenci natychmiast opuszczają budynek.
+
+Napisz procedury Dyrektor, Rejestracja(biletomat), Urzędnik i Petent symulujące działanie urzędu miasta.
 
 Raport z przebiegu symulacji zapisać w pliku (plikach) tekstowym.
 

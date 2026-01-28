@@ -97,7 +97,7 @@ int main(int argc, char* argv[]) {
     // logika otwierania biletomatu
     if(machine_is_opened == 0 && tqueue >= count_diff){
       machine_is_opened = 1;
-      sem_unlock(urzad->semlock, urzad->sems.tickets);
+      // sem_unlock(urzad->semlock, urzad->sems.tickets);
       {
         char txt[64];
         snprintf(txt, sizeof(txt), "[rejestracja] Biletomat nr %d zostaje otwarty", machine_id);
@@ -120,7 +120,7 @@ int main(int argc, char* argv[]) {
 
       if(urzad_is_opened == 0 || (machine_is_opened == 1 && tqueue < count_diff)){
         machine_is_opened = 0;
-        sem_lock(urzad->semlock, urzad->sems.tickets);
+        // sem_lock(urzad->semlock, urzad->sems.tickets);
         {
           char txt[64];
           snprintf(txt, sizeof(txt), "[rejestracja] Biletomat nr %d zostaje zamkniety", machine_id);
@@ -131,7 +131,12 @@ int main(int argc, char* argv[]) {
 
       // logika druku biletu
       if(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 1, IPC_NOWAIT) != -1) {
+        sync_sleep((rand() % 3) + 2); // symulacja zalatwiania sprawy dla petenta przez 2-5 sekund
+
         sem_lock(urzad->semlock, urzad->semlock_idx);
+
+        int original_ticket_id = tck.ticketid;
+        int original_faculty = tck.facultytype;
 
         int status = 0;
         struct sembuf op;
@@ -189,8 +194,35 @@ int main(int argc, char* argv[]) {
           };
         }
 
+        // Send dyrektor a message if petent can't receive a ticket besacuse limit is exceeded
+        if(tck.ticketid == -1){
+          tck.mtype = 2;
+          tck.ticketid = original_ticket_id;
+          tck.facultytype = original_faculty;
+          tck.queueid = 1;
+          msgsnd(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), 0);
+        }
+
         sem_unlock(urzad->semlock, urzad->semlock_idx);
       }
+
+      // obsluga blokady globalnej wejscia
+      sem_lock(urzad->semlock, urzad->semlock_idx);
+      int is_locked = urzad->is_locked;
+      if(
+        (sem_getvalue(urzad->semlock, urzad->sems.km_limit) + 
+        sem_getvalue(urzad->semlock, urzad->sems.ml_limit) + 
+        sem_getvalue(urzad->semlock, urzad->sems.pd_limit) + 
+        sem_getvalue(urzad->semlock, urzad->sems.sc_limit) + 
+        sem_getvalue(urzad->semlock, urzad->sems.sa1_limit) + 
+        sem_getvalue(urzad->semlock, urzad->sems.sa2_limit) == 0)
+        && is_locked == 0
+      ){
+        logger_log(logger_id, "[rejestracja] Limity zostaly osiagniete. Blokujemy wejscie", LOG_INFO);
+        urzad->is_locked = 1;
+        sem_setvalue(urzad->semlock, urzad->sems.building, 0);
+      }
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
 
       sync_sleep(1);
     }
