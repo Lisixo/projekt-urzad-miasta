@@ -151,7 +151,7 @@ int logger_log(int msgid, const char* message, LogLevel level) {
     printf("%s\n", m.mtext);
   }
 
-  if(msgsnd(msgid, &m, sizeof(m.mtext), 0) == -1) {
+  if(msgsnd(msgid, &m, sizeof(m.mtext), IPC_NOWAIT) == -1) {
     perror("logger_log: failed to send message ::");
     return -1;
   }
@@ -178,8 +178,6 @@ void logger_destroy(Logger* logger) {
   pthread_mutex_lock(&logger->controller.lock);
   logger->controller.stop = 1;
   pthread_mutex_unlock(&logger->controller.lock);
-  
-  logger_log(logger->msgid, "logger thread stoped", LOG_DEBUG);
     
   pthread_join(logger->thread, NULL);
   sync_msg_destroy(logger->msgid);

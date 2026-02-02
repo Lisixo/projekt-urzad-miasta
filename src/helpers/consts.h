@@ -10,8 +10,11 @@
 #define D_MSG_WORKER_OFFSET 10
 #define D_MSG_WORKER_PRIORITY_OFFSET 20
 
-#define DYREKTOR_MAX_LOBBY 30
+#define DYREKTOR_MAX_LOBBY 500
 #define PETENT_COUNT 10000
+
+// time = hours * 60 + minutes
+// -1 = use buildin time
 #define URZAD_TIME_OPEN -1
 #define URZAD_TIME_CLOSE -1
 

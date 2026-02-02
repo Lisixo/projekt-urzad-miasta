@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
   srand(getpid());
   signal(SIGUSR1, signal1handler);
   signal(SIGUSR2, SIG_IGN);
-  signal(SIGINT, SIG_IGN); // wait for graceful closing by dyrektor (not by main.c)
+  // signal(SIGINT, SIG_IGN); // wait for graceful closing by dyrektor (not by main.c)
 
   if(argc != 2){
     printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY");
@@ -256,7 +256,6 @@ int main(int argc, char* argv[]) {
         logger_log(logger_id, txt, LOG_INFO);
       }
     }
-    
     while(msgrcv(global_msg_id, &tck, sizeof(tck) - sizeof(tck.mtype), type + D_MSG_WORKER_OFFSET, IPC_NOWAIT) != -1){
       // Send dyrektor a message if petent can't receive a ticket besacuse limit is exceeded
       tck.mtype = 2;

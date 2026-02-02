@@ -255,6 +255,8 @@ int main() {
     snprintf(txt, sizeof(txt), "[dyrektor] Liczba osob oczekujacych przed budynkiem: %d", sem_wait_value(urzad->semlock, urzad->sems.building));
     logger_log(logger_id, txt, LOG_DEBUG);
   }
+  
+  sync_sleep(20);
 
   // Write raport
   FILE* f = fopen("raport.txt", "w");
@@ -290,7 +292,6 @@ int main() {
   }
   kill(0, SIGUSR2);
 
-  sync_sleep(5);
   free(pt_arg.tickets);
   logger_log(logger_id, "[dyrektor] Zakonczono procedure dyrektor", LOG_INFO);
   return 0;

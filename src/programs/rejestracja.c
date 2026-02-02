@@ -14,7 +14,7 @@
 int main(int argc, char* argv[]) {
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, SIG_IGN);
-  signal(SIGINT, SIG_IGN); // wait for graceful closing by dyrektor (not by main.c)
+  // signal(SIGINT, SIG_IGN); // wait for graceful closing by dyrektor (not by main.c)
   srand(getpid());
 
   if(argc != 2){

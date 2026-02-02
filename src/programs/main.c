@@ -196,12 +196,14 @@ void exit_signal_handler(int sig) {
   }
 
   if(res->stan_urzedu_shm){
+    signal(SIGINT, SIG_IGN);
     stan_urzedu_t* u;
     u = shmat(res->stan_urzedu_shm, NULL, 0);
     if(kill(u->dyrektor_pid, 0) == 0) {
       kill(u->dyrektor_pid, SIGINT);
       shmdt(u);
     }
+    kill(0, SIGINT);
   }
 
   shutdown(res);

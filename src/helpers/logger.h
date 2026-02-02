@@ -4,7 +4,7 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 
-#define LOG_MSG_SIZE 400
+#define LOG_MSG_SIZE 256
 
 typedef enum {
   LOG_DEBUG = 2,
