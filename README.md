@@ -38,3 +38,4 @@ Raport z przebiegu symulacji zapisać w pliku (plikach) tekstowym.
 ## Link
 
 [Github](https://github.com/Lisixo/projekt-urzad-miasta)
+[Raport](RAPORT.md)

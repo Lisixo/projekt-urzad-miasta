@@ -3,10 +3,7 @@
 
 #define KEY_MAIN_LOGGER 'L'
 #define KEY_SHM_URZAD 'U'
-#define KEY_SHM_PETENT_LIMIT 'P'
-#define KEY_SHM_SEMLOCK 'Q'
-#define KEY_SHM_RAPORT 'E'
-#define KEY_SEM_LIMITS 'R'
+#define KEY_SEM_SEMLOCK 'Q'
 #define KEY_MSG_GLOBAL 'G'
 
 #define D_MSG_TICKET_OFFSET 0
@@ -14,14 +11,14 @@
 #define D_MSG_WORKER_PRIORITY_OFFSET 20
 
 #define DYREKTOR_MAX_LOBBY 30
-#define PETENT_COUNT 300
+#define PETENT_COUNT 10000
 #define URZAD_TIME_OPEN -1
 #define URZAD_TIME_CLOSE -1
 
+// shared structures
+
 #define WORKER_COUNT 7
 #define TICKET_MACHINE_COUNT 3
-
-// shared structures
 
 typedef enum {
   FACULTY_SC = 1,
@@ -76,9 +73,12 @@ struct stan_urzedu {
   int building_max;
   int taken_ticket_count;
 
+  pid_t dyrektor_pid;
+
   pid_t urzednicy_pids[WORKER_COUNT];
   pid_t rejestracja_pids[TICKET_MACHINE_COUNT];
   pid_t petent_pids[PETENT_COUNT];
+  int petent_pids_limit;
 };
 typedef struct stan_urzedu stan_urzedu_t;
 

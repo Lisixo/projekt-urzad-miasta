@@ -2,12 +2,14 @@
 #include "helpers/logger.h"
 #include "helpers/sync.h"
 #include "helpers/consts.h"
-#include "sys/shm.h"
+#include <sys/shm.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 typedef struct {
   Logger* log;
@@ -27,8 +29,17 @@ int shutdown(res_t* res) {
 res_t* alloc_res() {
   res_t* res = malloc(sizeof(res_t));
 
+  // make dir for logs
+  if(mkdir("./logs", 0755) == -1) {
+    if(errno != EEXIST) {
+      perror("[main/init] cannot create logs dir ::");
+      free(res);
+      exit(1);
+    }
+  }
+
   // logger init
-  res->log = logger_create(uniq_key(KEY_MAIN_LOGGER), "./logs/", LOG_DEBUG);
+  res->log = logger_create(uniq_key(KEY_MAIN_LOGGER), "./logs", LOG_DEBUG);
   if(!res->log) {
     printf("[main/alloc] Nie mozna utworzyc loggera. Zwalnianie zasobow\n");
     free(res);
@@ -36,7 +47,7 @@ res_t* alloc_res() {
   }
 
   // shm semlock init
-  res->global_sem = sem_create(uniq_key(KEY_SHM_SEMLOCK), 30, 1);
+  res->global_sem = sem_create(uniq_key(KEY_SEM_SEMLOCK), 30, 1);
   int curr_sem_idx = 0;
   if(res->global_sem == -1) {
     logger_log(res->log->msgid, "[main/alloc] Nie mozna utworzyc global SEM", LOG_ERROR);
@@ -57,6 +68,11 @@ res_t* alloc_res() {
 
     urzad->semlock = res->global_sem;
     urzad->semlock_idx = curr_sem_idx++;
+
+    for(int i=0; i < PETENT_COUNT; i++) {
+      urzad->petent_pids[i] = 0;
+    }
+    urzad->petent_pids_limit = PETENT_COUNT;
 
     sem_lock(urzad->semlock, urzad->semlock_idx);
 
@@ -79,22 +95,22 @@ res_t* alloc_res() {
     sem_setvalue(urzad->semlock, s.tickets, TICKET_MACHINE_COUNT);
 
     s.km_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.km_limit, 1);
+    sem_setvalue(urzad->semlock, s.km_limit, PETENT_COUNT * 10 / 100);
     s.km_queue = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.km_queue, 1);
 
     s.ml_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.ml_limit, 1);
+    sem_setvalue(urzad->semlock, s.ml_limit, PETENT_COUNT * 10 / 100);
     s.ml_queue = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.ml_queue, 1);
 
     s.pd_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.pd_limit, 1);
+    sem_setvalue(urzad->semlock, s.pd_limit, PETENT_COUNT * 10 / 100);
     s.pd_queue = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.pd_queue, 1);
 
     s.sc_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sc_limit, 1);
+    sem_setvalue(urzad->semlock, s.sc_limit, PETENT_COUNT * 10 / 100);
     s.sc_queue = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.sc_queue, 1);
 
@@ -103,9 +119,9 @@ res_t* alloc_res() {
     int sa_half = sa_max / 2;
 
     s.sa1_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sa1_limit, 1);
+    sem_setvalue(urzad->semlock, s.sa1_limit, sa_half);
     s.sa2_limit = curr_sem_idx++;
-    sem_setvalue(urzad->semlock, s.sa2_limit, 1);
+    sem_setvalue(urzad->semlock, s.sa2_limit, PETENT_COUNT - sa_half);
     s.sa_queue = curr_sem_idx++;
     sem_setvalue(urzad->semlock, s.sa_queue, 2);
 
@@ -172,12 +188,23 @@ res_t *res = NULL;
 void exit_signal_handler(int sig) {
   char txt[64];
   snprintf(txt, sizeof(txt), "[main/sighandler/%d] Zamykanie aplikacji", sig);
-  // kill(0, SIGTERM);
+
   if(res->log){
     logger_log(res->log->msgid, txt, LOG_WARNING);
   } else {
     printf("%s", txt);
   }
+
+  if(res->stan_urzedu_shm){
+    stan_urzedu_t* u;
+    u = shmat(res->stan_urzedu_shm, NULL, 0);
+    if(kill(u->dyrektor_pid, 0) == 0) {
+      kill(u->dyrektor_pid, SIGINT);
+      shmdt(u);
+    }
+    return;
+  }
+
   shutdown(res);
 }
 
@@ -222,7 +249,6 @@ int main() {
   // fork
   generate_ticket_machines(res, TICKET_MACHINE_COUNT);
   generate_workers(res);
-  generate_customers(res, PETENT_COUNT);
 
   int status;
   pid_t pid;
@@ -234,36 +260,6 @@ int main() {
 
   free_res(res);
   return 0;
-}
-
-int generate_customers(res_t* res, int count) {
-  stan_urzedu_t *u;
-  u = shmat(res->stan_urzedu_shm, NULL, 0);
-
-  sem_lock(u->semlock, u->semlock_idx);
-  
-  for(int i = 0; i < count; i++) {
-    pid_t pid = fork();
-    switch(pid) {
-      case -1:
-        char txt[64];
-        snprintf(txt, sizeof(txt), "[main/init/petent] Nie mozna utworzyc PID");
-        logger_log(res->log->msgid, txt, LOG_ERROR);
-        shutdown(res);
-        break;
-      case 0:
-        execl("./petent", "petent", NULL);
-        
-        logger_log(res->log->msgid, "[main/init/petent] Nie mozna uruchomic procedury", LOG_ERROR);
-        shutdown(res);
-        break;
-      default:
-        u->petent_pids[i] = pid;
-    }
-  }
-  
-  sem_unlock(u->semlock, u->semlock_idx);
-  shmdt(u);
 }
 
 int generate_ticket_machines(res_t* res, int count) {
@@ -303,8 +299,6 @@ int generate_workers(res_t* res) {
   sem_lock(u->semlock, u->semlock_idx);
   
   FacultyType workertypes[WORKER_COUNT] = {FACULTY_KM, FACULTY_PD, FACULTY_ML, FACULTY_SC, FACULTY_SA, FACULTY_SA, CASHIER_POINT};
-  int queueidx[WORKER_COUNT] = {u->sems.km_queue, u->sems.pd_queue, u->sems.ml_queue, u->sems.sc_queue, u->sems.sa_queue, u->sems.sa_queue, u->sems.cashier_queue};
-  int limitidx[WORKER_COUNT] = {u->sems.km_limit, u->sems.pd_limit, u->sems.ml_limit, u->sems.sc_limit, u->sems.sa1_limit, u->sems.sa2_limit, 0};
 
   for(int i=0; i<WORKER_COUNT; i++) {
     pid_t pid = fork();
@@ -316,11 +310,7 @@ int generate_workers(res_t* res) {
       case 0:
         char faculty[4];
         snprintf(faculty, sizeof(faculty), "%d", workertypes[i]);
-        char limit_semlock[4];
-        snprintf(limit_semlock, sizeof(limit_semlock), "%d", limitidx[i]);
-        char queue_semlock[4];
-        snprintf(queue_semlock, sizeof(queue_semlock), "%d", queueidx[i]);
-        execl("./urzednik", "urzednik", faculty, queue_semlock, limit_semlock, (char *)NULL);
+        execl("./urzednik", "urzednik", faculty, (char *)NULL);
 
         logger_log(res->log->msgid, "[main/init/urzednik] Nie mozna uruchomic procedury", LOG_ERROR);
         shutdown(res);

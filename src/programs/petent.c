@@ -7,11 +7,12 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/signal.h>
-#include <sys/errno.h>
 #include "helpers/consts.h"
 #include "helpers/sync.h"
 #include "helpers/logger.h"
 #include "helpers/utils.h"
+#include <errno.h>
+#include <string.h>
 
 volatile sig_atomic_t sig2;
 
@@ -111,6 +112,7 @@ int main() {
   srand(getpid());
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, signal2handler);
+  signal(SIGINT, signal2handler);
 
   // attach logger
   int logger_id = msgget(uniq_key(KEY_MAIN_LOGGER), SYNC_PERM);
@@ -163,6 +165,24 @@ int main() {
     shutdown(&petent, 1);
   }
 
+  sem_lock(urzad->semlock, urzad->semlock_idx);
+  {
+    int entered = 0;
+    for(int i=0; i<urzad->petent_pids_limit; i++) {
+      if(urzad->petent_pids[i] == 0) {
+        urzad->petent_pids[i] = getpid();
+        entered = 1;
+        break;
+      }
+    }
+    if(entered == 0) {
+      sem_unlock(urzad->semlock, urzad->semlock_idx);
+      logger_log(logger_id, "[petent/init] Lista obslugi petentow jest pelna", LOG_ERROR);
+      shutdown(&petent, 1);
+    }
+  }
+  sem_unlock(urzad->semlock, urzad->semlock_idx);
+
   // wait for urzad setup
   if(sem_lock(urzad->semlock, urzad->sems.configured) == -1) {
     logger_log(logger_id, "[petent] Nie moge znalesc informacji o godzine otwarcia urzedu", LOG_ERROR);
@@ -183,7 +203,7 @@ int main() {
   
   //wait for arrival
   {
-    time_t t = urzad->time_open - time(NULL);
+    time_t t = arrive_time - time(NULL);
     if((int)t > 0){
       sync_sleep((int)t);
     }
@@ -191,7 +211,6 @@ int main() {
 
   if (sig2) shutdown(&petent, 0);
   
-  // logger_log(logger_id, "[petent] Sprawdzam czy urzad jest otwarty", LOG_INFO);
   // wait for opening
   if(sem_lock(urzad->semlock, urzad->sems.opened) == -1) {
     logger_log(logger_id, "[petent] Chyba urzad dzisiaj wogole nie pracuje. Wracam do domu", LOG_ERROR);
@@ -209,7 +228,12 @@ int main() {
 
   // try go into building
   if(sem_lock_multi(urzad->semlock, urzad->sems.building, petent.people_count) == -1) {
-    logger_log(logger_id, "[petent] Nie moge wejsc do budynku. Wracam do domu", LOG_ERROR);
+    if(sig2) {
+      logger_log(logger_id, "[petent] Budynek zostal juz zamkniety. Wracam do domu", LOG_WARNING);
+    }
+    else {
+      logger_log(logger_id, "[petent] Nie moge wejsc do budynku. Wracam do domu", LOG_ERROR);
+    }
     shutdown(&petent, 0);
   }
 

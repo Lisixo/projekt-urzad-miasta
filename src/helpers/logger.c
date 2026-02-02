@@ -136,7 +136,7 @@ int logger_log(int msgid, const char* message, LogLevel level) {
   m.mtype = level;
 
   if(strlen(message) > LOG_MSG_SIZE - sizeof(prefix)){
-    printf("logger_log: message is too big. it will be truncated ");
+    fprintf(stderr, "logger_log: message is too big. it will be truncated");
   }
 
   strftime(tm, sizeof(tm), "%Y-%m-%d %H:%M:%S", t);
@@ -144,16 +144,16 @@ int logger_log(int msgid, const char* message, LogLevel level) {
 
   snprintf(m.mtext, sizeof(m.mtext), "%s %s", prefix, message);
 
-  if(msgsnd(msgid, &m, sizeof(m.mtext), 0) == -1) {
-    perror("logger_log: failed to send message ::");
-    return -1;
-  }
-
   if(level == LOG_ERROR && errno != 0) {
     fprintf(stderr, "%s (errnomsg: %s) \n", m.mtext, strerror(errno));
   }
   else {
     printf("%s\n", m.mtext);
+  }
+
+  if(msgsnd(msgid, &m, sizeof(m.mtext), 0) == -1) {
+    perror("logger_log: failed to send message ::");
+    return -1;
   }
 
   return 0;

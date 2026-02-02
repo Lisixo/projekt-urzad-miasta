@@ -30,6 +30,11 @@ struct pthread_control {
 };
 typedef struct pthread_control pthread_control_t;
 
+volatile sig_atomic_t keep_running = 1;
+void sigint_handler(int sig) {
+  keep_running = 0;
+}
+
 void* rejected_ticket_loop(void* arg) {
   pthread_control_t* c = (pthread_control_t*)arg;
   int msg;
@@ -77,6 +82,7 @@ int main() {
   srand(time(NULL));
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, SIG_IGN);
+  signal(SIGINT, sigint_handler);
 
   // attach logger
   int logger_id = msgget(uniq_key(KEY_MAIN_LOGGER), SYNC_PERM);
@@ -136,9 +142,10 @@ int main() {
   }
 
   wygeneruj_stan_urzedu(urzad);
+  urzad->dyrektor_pid = getpid();
 
   // mark urzad as configured
-  sem_setvalue(urzad->semlock, urzad->sems.configured, PETENT_COUNT + 1);
+  sem_setvalue(urzad->semlock, urzad->sems.configured, 1000);
 
   {
     struct tm to = *localtime(&urzad->time_open);
@@ -191,7 +198,7 @@ int main() {
   }
 
   // WORKING TIME
-  while(time(NULL) < urzad->time_close){
+  while(keep_running && time(NULL) < urzad->time_close){
     sync_sleep(1);
 
     // Event 1: Zwolnienie losowego pracownika szybciej do domu
@@ -205,11 +212,15 @@ int main() {
 
     // // Event 2: Ewakuacja
     if(rand() % 2000 == 0) {
+      for(int i=0; i < urzad->petent_pids_limit; i++) {
+        if(urzad->petent_pids[i] != 0) {
+          kill(urzad->petent_pids[i], SIGUSR2);
+          urzad->petent_pids[i] = 0;
+        }
+      }
       kill(0, SIGUSR2);
       break;
     }
-
-    // Receive ticket
   }
 
   // Set close flag
@@ -244,7 +255,7 @@ int main() {
     pthread_mutex_lock(&pt_arg.lock);
     struct tm ts = *localtime(&urzad->time_open);
     struct tm tc = *localtime(&urzad->time_close);
-    fprintf(f, "Raport %02d:%02d - %02d:%02d\n\nLiczba biletow: %d\n", ts.tm_hour, ts.tm_min, tc.tm_hour, tc.tm_min, pt_arg.ticket_count);
+    fprintf(f, "Raport %02d:%02d - %02d:%02d\n\nLiczba odrzuconych biletow: %d\n", ts.tm_hour, ts.tm_min, tc.tm_hour, tc.tm_min, pt_arg.ticket_count);
     for(int i = 0; i < pt_arg.ticket_count; i++) {
       msg_ticket_t tck = pt_arg.tickets[i];
       fprintf(f, "-----------\nPetent ID: %d\nBilet ID: %d\nSkierowanie do: %s\nWystawil: %s\n", tck.requester, tck.ticketid, tck.facultytype == 1 ? "Biletomat" : faculty_to_str(tck.facultytype), tck.queueid == 1 ? "Biletomat" : faculty_to_str(tck.queueid));
@@ -261,7 +272,15 @@ int main() {
   pthread_mutex_unlock(&pt_arg.lock);
   pthread_join(pt_thread, NULL);
 
+  for(int i=0; i < urzad->petent_pids_limit; i++) {
+    if(urzad->petent_pids[i] != 0) {
+      kill(urzad->petent_pids[i], SIGUSR2);
+      urzad->petent_pids[i] = 0;
+    }
+  }
   kill(0, SIGUSR2);
+
+  sync_sleep(5);
   free(pt_arg.tickets);
   logger_log(logger_id, "[dyrektor] Zakonczono procedure dyrektor", LOG_INFO);
   return 0;
@@ -278,9 +297,9 @@ void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
     urzad->time_open = now + 10; // instant
   }
   else {
-    urzad->time_open = base + ((URZAD_TIME_OPEN % 24) * 3600) - t->tm_gmtoff;
+    urzad->time_open = base + ((URZAD_TIME_OPEN % (24*60)) * 60) - t->tm_gmtoff;
 
-    if(urzad->time_open < now){
+    while(urzad->time_open < now){
       urzad->time_open += (24 * 60 * 60);
     }
   }
@@ -290,9 +309,9 @@ void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
     urzad->time_close = urzad->time_open + 5*60; // always 5 minutes
   }
   else {
-    urzad->time_close = base + ((URZAD_TIME_CLOSE % 24) * 3600) - t->tm_gmtoff;
+    urzad->time_close = base + ((URZAD_TIME_CLOSE % (24*60)) * 60) - t->tm_gmtoff;
 
-    if(urzad->time_close < now){
+    while(urzad->time_close < now){
       urzad->time_close += (24 * 60 * 60);
     }
   }

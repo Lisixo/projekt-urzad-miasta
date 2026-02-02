@@ -23,9 +23,10 @@ int main(int argc, char* argv[]) {
   srand(getpid());
   signal(SIGUSR1, signal1handler);
   signal(SIGUSR2, SIG_IGN);
+  signal(SIGINT, SIG_IGN); // wait for graceful closing by dyrektor (not by main.c)
 
-  if(argc != 4){
-    printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY QUEUE_SEMLOCK LIMIT_SEMLOCK");
+  if(argc != 2){
+    printf("[urzednik/argv] Wymaganie argumenty: ./urzednik FACULTY");
     return 1;
   }
   
@@ -41,16 +42,6 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     type = (FacultyType)temp_type;
-  }
-  int queue_semlock_idx;
-  if(sscanf(argv[2], "%d", &queue_semlock_idx) != 1) {
-    fprintf(stderr, "[urzednik/argv] Niepoprawny argument QUEUE_SEMLOCK (required: int)");
-    return 1;
-  }
-  int limit_semlock_idx;
-  if(sscanf(argv[3], "%d", &limit_semlock_idx) != 1) {
-    fprintf(stderr, "[urzednik/argv] Niepoprawny argument LIMIT_SEMLOCK (required: int)");
-    return 1;
   }
 
   // attach logger
@@ -142,6 +133,7 @@ int main(int argc, char* argv[]) {
     int original_ticket_id = tck.ticketid;
     int original_faculty = tck.facultytype;
 
+    // Redirection from SA
     if(type == FACULTY_SA && rand() % 100 < 40) {
       tck.redirected_from = tck.facultytype;
       int limit_idx;
@@ -181,17 +173,20 @@ int main(int argc, char* argv[]) {
       }
 
     }
+    // Need payment event
     else if(type != FACULTY_SA && type != CASHIER_POINT && tck.payment == PAYMENT_NOT_NEEDED && rand() % 10 == 0){
       tck.payment = PAYMENT_NEEDED;
 
       tck.redirected_from = tck.facultytype;
       tck.queueid = CASHIER_POINT + (vip == 1 ? D_MSG_WORKER_PRIORITY_OFFSET : D_MSG_WORKER_OFFSET);
     }
+    // CASHIER handler
     else if(type == CASHIER_POINT) {
       tck.payment = PAYMENT_SUCCESS;
       tck.facultytype = tck.redirected_from;
       tck.queueid = tck.redirected_from + D_MSG_WORKER_PRIORITY_OFFSET;
     }
+    // All done
     else {
       tck.facultytype = 0;
       tck.queueid = 0;
