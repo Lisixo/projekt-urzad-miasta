@@ -197,21 +197,31 @@ int main() {
     logger_log(logger_id, "[dyrektor] Urzad zostal otwarty", LOG_INFO);
   }
 
+  int event_enabled = 0;
+
   // WORKING TIME
   while(keep_running && time(NULL) < urzad->time_close){
     sync_sleep(1);
 
+    // events start after 30 seconds
+    if(!event_enabled && urzad->time_open + 30 < time(NULL)) {
+      event_enabled = 1;
+    }
+
     // Event 1: Zwolnienie losowego pracownika szybciej do domu
-    if(rand() % 2000 == 0) {
+    if(rand() % 2000 == 0 && event_enabled) {
+      logger_log(logger_id, "[dyrektor] Uruchomiono SIGUSR1", LOG_INFO);
       sem_lock(urzad->semlock, urzad->semlock_idx);
       pid_t p = urzad->urzednicy_pids[p % WORKER_COUNT];
       sem_unlock(urzad->semlock, urzad->semlock_idx);
 
       kill(p, SIGUSR1);
+      break;
     }
 
-    // // Event 2: Ewakuacja
-    if(rand() % 2000 == 0) {
+    // Event 2: Ewakuacja
+    if(rand() % 2000 == 0 && event_enabled) {
+      logger_log(logger_id, "[dyrektor] Uruchomiono SIGUSR2", LOG_INFO);
       for(int i=0; i < urzad->petent_pids_limit; i++) {
         if(urzad->petent_pids[i] != 0) {
           kill(urzad->petent_pids[i], SIGUSR2);
@@ -288,7 +298,7 @@ int main() {
 
 void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
   time_t now = time(NULL);
-  struct tm* t = localtime(&now);
+  struct tm t = *localtime(&now);
   time_t offset = (now % (24 * 60 * 60));
   time_t base = now - offset;
 
@@ -297,7 +307,7 @@ void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
     urzad->time_open = now + 10; // instant
   }
   else {
-    urzad->time_open = base + ((URZAD_TIME_OPEN % (24*60)) * 60) - t->tm_gmtoff;
+    urzad->time_open = base + ((URZAD_TIME_OPEN % (24*60)) * 60) - t.tm_gmtoff;
 
     while(urzad->time_open < now){
       urzad->time_open += (24 * 60 * 60);
@@ -309,7 +319,7 @@ void wygeneruj_stan_urzedu(stan_urzedu_t *urzad) {
     urzad->time_close = urzad->time_open + 5*60; // always 5 minutes
   }
   else {
-    urzad->time_close = base + ((URZAD_TIME_CLOSE % (24*60)) * 60) - t->tm_gmtoff;
+    urzad->time_close = base + ((URZAD_TIME_CLOSE % (24*60)) * 60) - t.tm_gmtoff;
 
     while(urzad->time_close < now){
       urzad->time_close += (24 * 60 * 60);

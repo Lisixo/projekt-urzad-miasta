@@ -202,7 +202,6 @@ void exit_signal_handler(int sig) {
       kill(u->dyrektor_pid, SIGINT);
       shmdt(u);
     }
-    return;
   }
 
   shutdown(res);
